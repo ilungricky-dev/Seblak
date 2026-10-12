@@ -1,0 +1,7 @@
+{
+  "name": "Warung Seblak Cinta - POS & Manajemen Stok",
+  "description": "Aplikasi kasir warung seblak cinta dengan manajemen stok masuk/keluar, cetak struk bluetooth thermal, laporan penjualan & stok PDF/Excel, serta sinkronisasi spreadsheet offline & realtime.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
