@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Boxes,
   PlusCircle,
@@ -14,10 +14,24 @@ import {
   PackageCheck,
   PackageMinus,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { MenuItem, StockMovement, StockMovementType } from '../types';
 import { recordStockIn, recordStockManualOut } from '../utils/storage';
 import { formatRupiah } from '../utils/printer';
+import { parseNumberInput, formatNumberWithDots } from '../utils/numberUtils';
+
+export interface StockNotificationToast {
+  type: 'IN' | 'OUT';
+  title: string;
+  itemName: string;
+  quantity: number;
+  unit: string;
+  reason: string;
+  previousStock: number;
+  newStock: number;
+  timestamp: string;
+}
 
 interface StockManagementViewProps {
   menuItems: MenuItem[];
@@ -32,17 +46,29 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'masuk' | 'keluar' | 'riwayat'>('masuk');
 
+  // Floating Stock Notification Toast
+  const [stockNotification, setStockNotification] = useState<StockNotificationToast | null>(null);
+
+  // Auto-dismiss floating toast after 5 seconds
+  useEffect(() => {
+    if (!stockNotification) return;
+    const timer = setTimeout(() => {
+      setStockNotification(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [stockNotification]);
+
   // Input Stok Masuk Form State
   const [inMenuId, setInMenuId] = useState<string>(menuItems[0]?.id || '');
-  const [inQuantity, setInQuantity] = useState<number>(10);
-  const [inCostPrice, setInCostPrice] = useState<number>(0);
+  const [inQuantity, setInQuantity] = useState<number | string>(10);
+  const [inCostPrice, setInCostPrice] = useState<number | string>(0);
   const [inReason, setInReason] = useState<string>('Kulakan / Restock bahan baku');
   const [inDate, setInDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [inSuccessMsg, setInSuccessMsg] = useState<string | null>(null);
 
   // Input Stok Keluar Form State
   const [outMenuId, setOutMenuId] = useState<string>(menuItems[0]?.id || '');
-  const [outQuantity, setOutQuantity] = useState<number>(1);
+  const [outQuantity, setOutQuantity] = useState<number | string>(1);
   const [outReasonType, setOutReasonType] = useState<string>('Bahan Rusak / Basi');
   const [outCustomReason, setOutCustomReason] = useState<string>('');
   const [outDate, setOutDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -65,48 +91,86 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
   // Handle Stok Masuk Submit
   const handleStockInSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inMenuId || inQuantity <= 0) {
-      alert('Pilih menu dan masukkan jumlah stok masuk yang valid!');
+    const qty = parseNumberInput(inQuantity);
+    const cost = parseNumberInput(inCostPrice);
+
+    if (!inMenuId || qty <= 0) {
+      alert('Pilih menu dan masukkan jumlah stok masuk yang valid (lebih dari 0)!');
       return;
     }
 
     try {
       const targetMenu = menuItems.find(m => m.id === inMenuId);
+      const prevStock = targetMenu?.stock ?? 0;
+      const cleanReason = inReason.trim() || 'Kulakan / Restock bahan baku';
+
       recordStockIn(
         inMenuId,
-        inQuantity,
-        inReason.trim() || 'Restock bahan baku',
-        inCostPrice > 0 ? inCostPrice : targetMenu?.costPrice,
+        qty,
+        cleanReason,
+        cost > 0 ? cost : targetMenu?.costPrice,
         inDate
       );
       onStockUpdated();
+      const newStock = prevStock + qty;
+
       setInSuccessMsg(
-        `Sukses! +${inQuantity} ${targetMenu?.unit || 'Pcs'} ${targetMenu?.name} berhasil ditambahkan ke stok.`
+        `Stok Berhasil Ditambah! +${qty} ${targetMenu?.unit || 'Pcs'} ${targetMenu?.name} (Stok sekarang: ${newStock} ${targetMenu?.unit || 'Pcs'})`
       );
-      setTimeout(() => setInSuccessMsg(null), 3500);
+      setStockNotification({
+        type: 'IN',
+        title: 'Stok Berhasil Ditambah! 📦✨',
+        itemName: targetMenu?.name || 'Menu',
+        quantity: qty,
+        unit: targetMenu?.unit || 'Pcs',
+        reason: cleanReason,
+        previousStock: prevStock,
+        newStock,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      });
+
+      setTimeout(() => setInSuccessMsg(null), 4500);
       setInQuantity(10);
     } catch (err: any) {
       alert(`Gagal menambah stok: ${err.message}`);
     }
   };
 
-  // Handle Stok Keluar Submit
+  // Handle Stok Keluar Submit (Pengurangan stok karena kondisi tertentu, bukan penjualan)
   const handleStockOutSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!outMenuId || outQuantity <= 0) {
-      alert('Pilih menu dan masukkan jumlah stok keluar yang valid!');
+    const qty = parseNumberInput(outQuantity);
+
+    if (!outMenuId || qty <= 0) {
+      alert('Pilih menu dan masukkan jumlah stok keluar yang valid (lebih dari 0)!');
       return;
     }
 
     try {
       const targetMenu = menuItems.find(m => m.id === outMenuId);
+      const prevStock = targetMenu?.stock ?? 0;
       const combinedReason = `${outReasonType}${outCustomReason ? ` (${outCustomReason})` : ''}`;
-      recordStockManualOut(outMenuId, outQuantity, combinedReason, outDate);
+
+      recordStockManualOut(outMenuId, qty, combinedReason, outDate);
       onStockUpdated();
+      const newStock = Math.max(0, prevStock - qty);
+
       setOutSuccessMsg(
-        `Sukses! -${outQuantity} ${targetMenu?.unit || 'Pcs'} ${targetMenu?.name} berhasil dikeluarkan dari stok.`
+        `Stok Berhasil Dikurangi! -${qty} ${targetMenu?.unit || 'Pcs'} ${targetMenu?.name} karena kondisi tertentu: ${combinedReason} (Non-Penjualan. Sisa stok: ${newStock} ${targetMenu?.unit || 'Pcs'})`
       );
-      setTimeout(() => setOutSuccessMsg(null), 3500);
+      setStockNotification({
+        type: 'OUT',
+        title: 'Stok Berhasil Dikurangi! ⚠️📉',
+        itemName: targetMenu?.name || 'Menu',
+        quantity: qty,
+        unit: targetMenu?.unit || 'Pcs',
+        reason: combinedReason,
+        previousStock: prevStock,
+        newStock,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+      });
+
+      setTimeout(() => setOutSuccessMsg(null), 4500);
       setOutQuantity(1);
       setOutCustomReason('');
     } catch (err: any) {
@@ -194,13 +258,16 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
             </div>
 
             {inSuccessMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-700/80 text-emerald-200 text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>{inSuccessMsg}</span>
+              <div className="mb-4 p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-500/80 text-emerald-100 text-xs flex items-start gap-2.5 shadow-lg shadow-emerald-950/40 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-extrabold text-emerald-300 block">Notifikasi: Penambahan Stok Berhasil</span>
+                  <span>{inSuccessMsg}</span>
+                </div>
               </div>
             )}
 
-            <form onSubmit={handleStockInSubmit} className="space-y-4">
+            <form noValidate onSubmit={handleStockInSubmit} className="space-y-4">
               {/* Menu / Bahan Selection */}
               <div>
                 <label className="text-xs font-bold text-stone-300 block mb-1.5">
@@ -217,43 +284,83 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
                   }}
                   className="w-full px-3 py-2.5 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
                 >
-                  {menuItems.map(item => (
-                    <option key={item.id} value={item.id}>
-                      [{item.category}] {item.name} — Stok Saat Ini: {item.stock} {item.unit}
-                    </option>
-                  ))}
+                  {menuItems.map(item => {
+                    const itemMin = item.minStock ?? 5;
+                    const isLow = item.stock <= itemMin;
+                    return (
+                      <option key={item.id} value={item.id}>
+                        {isLow ? '⚠️ [KRITIS] ' : ''}[{item.category}] {item.name} — Stok: {item.stock}/{itemMin} {item.unit}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
               {/* Quantity & Unit */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-stone-300 block mb-1.5">
-                    Jumlah Masuk ({selectedInMenu?.unit || 'Pcs'}): <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-stone-300">
+                      Jumlah Masuk ({selectedInMenu?.unit || 'Pcs'}): <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                      +{parseNumberInput(inQuantity)} {selectedInMenu?.unit || 'Pcs'}
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
                     value={inQuantity}
-                    onChange={e => setInQuantity(Math.max(1, Number(e.target.value)))}
+                    onChange={e => setInQuantity(e.target.value)}
+                    placeholder="Contoh: 10"
                     className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-sm font-mono font-bold text-emerald-400 focus:outline-none focus:border-emerald-500"
                     required
                   />
+                  <div className="flex items-center gap-1 mt-1.5 overflow-x-auto scrollbar-none pb-0.5">
+                    <span className="text-[10px] text-stone-500 whitespace-nowrap">Cepat:</span>
+                    {[5, 10, 20, 50, 100].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setInQuantity(val)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-stone-950 border border-stone-800 text-stone-400 hover:text-emerald-300 whitespace-nowrap font-mono"
+                      >
+                        +{val}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-stone-300 block mb-1.5">
-                    Harga Modal / Beli Satuan (Rp):
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-stone-300">
+                      Harga Modal / Beli Satuan (Rp):
+                    </label>
+                    <span className="text-[11px] font-mono text-stone-300 font-bold">
+                      {formatRupiah(parseNumberInput(inCostPrice) || selectedInMenu?.costPrice || 0)}
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={inCostPrice || selectedInMenu?.costPrice || ''}
-                    onChange={e => setInCostPrice(Math.max(0, Number(e.target.value)))}
-                    placeholder="Harga beli"
+                    type="text"
+                    inputMode="numeric"
+                    value={inCostPrice}
+                    onChange={e => setInCostPrice(e.target.value)}
+                    placeholder="Contoh: 1000 atau 1.000"
                     className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-sm font-mono text-stone-200 focus:outline-none focus:border-emerald-500"
                   />
+                  <div className="flex items-center gap-1 mt-1.5 overflow-x-auto scrollbar-none pb-0.5">
+                    <span className="text-[10px] text-stone-500 whitespace-nowrap">Cepat:</span>
+                    {[1000, 2000, 5000, 10000, 15000].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setInCostPrice(val)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-stone-950 border border-stone-800 text-stone-400 hover:text-stone-200 whitespace-nowrap font-mono"
+                      >
+                        {formatNumberWithDots(val)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -287,27 +394,32 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
               </div>
 
               {/* Summary Calculation */}
-              {selectedInMenu && (
-                <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800/80 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-stone-400 block">Perkiraan Stok Baru:</span>
-                    <span className="text-sm font-bold text-stone-200">
-                      {selectedInMenu.stock} + <span className="text-emerald-400">+{inQuantity}</span> ={' '}
-                      <span className="text-emerald-400 font-extrabold">
-                        {selectedInMenu.stock + inQuantity} {selectedInMenu.unit}
-                      </span>
-                    </span>
-                  </div>
-                  {inCostPrice > 0 && (
-                    <div className="text-right">
-                      <span className="text-[11px] text-stone-400 block">Total Nilai Pembelian:</span>
-                      <span className="text-sm font-extrabold text-amber-400">
-                        {formatRupiah(inQuantity * inCostPrice)}
+              {selectedInMenu && (() => {
+                const parsedInQty = parseNumberInput(inQuantity);
+                const parsedInCost = parseNumberInput(inCostPrice);
+
+                return (
+                  <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-stone-400 block">Perkiraan Stok Baru:</span>
+                      <span className="text-sm font-bold text-stone-200">
+                        {selectedInMenu.stock} + <span className="text-emerald-400">+{parsedInQty}</span> ={' '}
+                        <span className="text-emerald-400 font-extrabold">
+                          {selectedInMenu.stock + parsedInQty} {selectedInMenu.unit}
+                        </span>
                       </span>
                     </div>
-                  )}
-                </div>
-              )}
+                    {parsedInCost > 0 && (
+                      <div className="text-right">
+                        <span className="text-[11px] text-stone-400 block">Total Nilai Pembelian:</span>
+                        <span className="text-sm font-extrabold text-amber-400">
+                          {formatRupiah(parsedInQty * parsedInCost)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <button
                 type="submit"
@@ -375,13 +487,16 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
             </div>
 
             {outSuccessMsg && (
-              <div className="mb-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-700/80 text-emerald-200 text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>{outSuccessMsg}</span>
+              <div className="mb-4 p-3.5 rounded-xl bg-amber-950/80 border border-amber-500/80 text-amber-100 text-xs flex items-start gap-2.5 shadow-lg shadow-amber-950/40 animate-in fade-in">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-extrabold text-amber-300 block">Notifikasi: Pengurangan Stok Kondisi Tertentu Berhasil (Non-Penjualan)</span>
+                  <span>{outSuccessMsg}</span>
+                </div>
               </div>
             )}
 
-            <form onSubmit={handleStockOutSubmit} className="space-y-4">
+            <form noValidate onSubmit={handleStockOutSubmit} className="space-y-4">
               {/* Menu / Bahan Selection */}
               <div>
                 <label className="text-xs font-bold text-stone-300 block mb-1.5">
@@ -392,34 +507,56 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
                   onChange={e => setOutMenuId(e.target.value)}
                   className="w-full px-3 py-2.5 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
                 >
-                  {menuItems.map(item => (
-                    <option key={item.id} value={item.id}>
-                      [{item.category}] {item.name} — Stok Saat Ini: {item.stock} {item.unit}
-                    </option>
-                  ))}
+                  {menuItems.map(item => {
+                    const itemMin = item.minStock ?? 5;
+                    const isLow = item.stock <= itemMin;
+                    return (
+                      <option key={item.id} value={item.id}>
+                        {isLow ? '⚠️ [KRITIS] ' : ''}[{item.category}] {item.name} — Stok: {item.stock}/{itemMin} {item.unit}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
               {/* Quantity */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-stone-300 block mb-1.5">
-                    Jumlah Keluar ({selectedOutMenu?.unit || 'Pcs'}): <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-stone-300">
+                      Jumlah Keluar ({selectedOutMenu?.unit || 'Pcs'}): <span className="text-rose-500">*</span>
+                    </label>
+                    <span className="text-[11px] font-mono text-rose-400 font-bold">
+                      -{parseNumberInput(outQuantity)} {selectedOutMenu?.unit || 'Pcs'}
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    min="1"
-                    max={selectedOutMenu?.stock || 9999}
+                    type="text"
+                    inputMode="numeric"
                     value={outQuantity}
-                    onChange={e => setOutQuantity(Math.max(1, Number(e.target.value)))}
+                    onChange={e => setOutQuantity(e.target.value)}
+                    placeholder="Contoh: 1"
                     className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-sm font-mono font-bold text-rose-400 focus:outline-none focus:border-rose-500"
                     required
                   />
-                  {selectedOutMenu && selectedOutMenu.stock < outQuantity && (
-                    <p className="text-[10px] text-red-400 mt-1">
+                  {selectedOutMenu && selectedOutMenu.stock < parseNumberInput(outQuantity) && (
+                    <p className="text-[10px] text-red-400 mt-1 font-semibold">
                       ⚠️ Melebihi stok saat ini ({selectedOutMenu.stock} {selectedOutMenu.unit})
                     </p>
                   )}
+                  <div className="flex items-center gap-1 mt-1.5 overflow-x-auto scrollbar-none pb-0.5">
+                    <span className="text-[10px] text-stone-500 whitespace-nowrap">Cepat:</span>
+                    {[1, 2, 5, 10, 20].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setOutQuantity(val)}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-stone-950 border border-stone-800 text-stone-400 hover:text-rose-300 whitespace-nowrap font-mono"
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div>
@@ -481,25 +618,29 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
               </div>
 
               {/* Summary Calculation */}
-              {selectedOutMenu && (
-                <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800/80 flex items-center justify-between">
-                  <div>
-                    <span className="text-[11px] text-stone-400 block">Stok Sisa Setelah Keluar:</span>
-                    <span className="text-sm font-bold text-stone-200">
-                      {selectedOutMenu.stock} - <span className="text-rose-400">-{outQuantity}</span> ={' '}
-                      <span className="text-rose-400 font-extrabold">
-                        {Math.max(0, selectedOutMenu.stock - outQuantity)} {selectedOutMenu.unit}
+              {selectedOutMenu && (() => {
+                const parsedOutQty = parseNumberInput(outQuantity);
+
+                return (
+                  <div className="p-3.5 rounded-xl bg-stone-950 border border-stone-800/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-stone-400 block">Stok Sisa Setelah Keluar:</span>
+                      <span className="text-sm font-bold text-stone-200">
+                        {selectedOutMenu.stock} - <span className="text-rose-400">-{parsedOutQty}</span> ={' '}
+                        <span className="text-rose-400 font-extrabold">
+                          {Math.max(0, selectedOutMenu.stock - parsedOutQty)} {selectedOutMenu.unit}
+                        </span>
                       </span>
-                    </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[11px] text-stone-400 block">Estimasi Kerugian (Modal):</span>
+                      <span className="text-sm font-extrabold text-red-400">
+                        {formatRupiah(parsedOutQty * selectedOutMenu.costPrice)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[11px] text-stone-400 block">Estimasi Kerugian (Modal):</span>
-                    <span className="text-sm font-extrabold text-red-400">
-                      {formatRupiah(outQuantity * selectedOutMenu.costPrice)}
-                    </span>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               <button
                 type="submit"
@@ -680,6 +821,102 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Stock Notification Toast */}
+      {stockNotification && (
+        <div className="fixed top-5 right-5 z-50 max-w-sm sm:max-w-md w-[calc(100vw-2.5rem)] animate-in fade-in slide-in-from-top-4 transition-all">
+          <div
+            className={`p-4 rounded-2xl shadow-2xl border backdrop-blur-md relative ${
+              stockNotification.type === 'IN'
+                ? 'bg-stone-900/95 border-emerald-500/80 text-stone-100 shadow-emerald-950/60'
+                : 'bg-stone-900/95 border-amber-500/80 text-stone-100 shadow-amber-950/60'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                    stockNotification.type === 'IN'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                  }`}
+                >
+                  {stockNotification.type === 'IN' ? (
+                    <PackageCheck className="w-5 h-5" />
+                  ) : (
+                    <PackageMinus className="w-5 h-5" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4
+                      className={`font-black text-sm ${
+                        stockNotification.type === 'IN' ? 'text-emerald-300' : 'text-amber-300'
+                      }`}
+                    >
+                      {stockNotification.title}
+                    </h4>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                        stockNotification.type === 'IN'
+                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                          : 'bg-amber-950 text-amber-300 border border-amber-700/60'
+                      }`}
+                    >
+                      {stockNotification.type === 'IN'
+                        ? `+${stockNotification.quantity} ${stockNotification.unit}`
+                        : `-${stockNotification.quantity} ${stockNotification.unit}`}
+                    </span>
+                    {stockNotification.type === 'OUT' && (
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-900/50 text-amber-300 border border-amber-700/60">
+                        Kondisi Non-Penjualan
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-stone-200 leading-snug">
+                    Bahan menu <strong className="text-white">{stockNotification.itemName}</strong>{' '}
+                    {stockNotification.type === 'IN' ? 'berhasil ditambahkan' : 'berhasil dikurangi'}{' '}
+                    sebanyak{' '}
+                    <strong
+                      className={stockNotification.type === 'IN' ? 'text-emerald-400' : 'text-amber-400'}
+                    >
+                      {stockNotification.type === 'IN' ? '+' : '-'}
+                      {stockNotification.quantity} {stockNotification.unit}
+                    </strong>
+                    .
+                  </p>
+
+                  <div className="p-2 rounded-xl bg-stone-950/80 border border-stone-800/80 text-[11px] text-stone-400 space-y-0.5">
+                    <div>
+                      <span className="text-stone-500">Alasan/Kondisi: </span>
+                      <span className="text-stone-200 font-medium">{stockNotification.reason}</span>
+                    </div>
+                    <div>
+                      <span className="text-stone-500">Mutasi Stok: </span>
+                      <span className="text-stone-400 font-mono">{stockNotification.previousStock}</span>
+                      <span className="text-stone-500 mx-1">➔</span>
+                      <strong className="text-white font-mono">
+                        {stockNotification.newStock} {stockNotification.unit}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setStockNotification(null)}
+                className="text-stone-500 hover:text-stone-300 p-1 rounded-lg hover:bg-stone-800 shrink-0 transition-colors"
+                title="Tutup Notifikasi"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}

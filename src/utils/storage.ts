@@ -79,7 +79,15 @@ export const saveStoreProfile = (profile: StoreProfile): void => {
 export const getMenuItems = (): MenuItem[] => {
   try {
     const data = localStorage.getItem(STORAGE_KEYS.MENU);
-    if (data !== null) return JSON.parse(data);
+    if (data !== null) {
+      const parsed: MenuItem[] = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return parsed.map(item => ({
+          ...item,
+          minStock: typeof item.minStock === 'number' ? item.minStock : 5,
+        }));
+      }
+    }
   } catch (e) {
     console.error('Error reading menu items:', e);
   }

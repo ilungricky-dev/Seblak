@@ -433,6 +433,7 @@ export default function App() {
         isOnline={isOnline}
         pendingSyncCount={pendingSyncCount}
         onSyncCompleted={refreshAllState}
+        activeEmployee={activeEmployee}
       />
 
       <DataResetModal

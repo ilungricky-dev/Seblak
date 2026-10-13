@@ -9,6 +9,7 @@ export interface MenuItem {
   price: number;
   costPrice: number; // Harga modal/beli untuk hitung laba
   stock: number;
+  minStock?: number; // Titik minimum stok untuk peringatan visual / notifikasi POS
   unit: UnitType;
   allowSpicyLevel: boolean;
   defaultSpicyLevel?: number; // 0 - 5

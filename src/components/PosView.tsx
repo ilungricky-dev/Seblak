@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   Plus,
@@ -15,6 +15,12 @@ import {
   Sparkles,
   ArrowRight,
   AlertCircle,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Bell,
+  PackageX,
+  Info,
   X,
   Bluetooth,
   Receipt,
@@ -32,6 +38,7 @@ import {
 import { SPICY_LEVELS } from '../utils/defaultData';
 import { formatRupiah, printViaBrowser, generateEscPosCommands, printRawToBluetooth, isBluetoothConnected } from '../utils/printer';
 import { createTransaction } from '../utils/storage';
+import { parseNumberInput, formatNumberWithDots } from '../utils/numberUtils';
 import { ReceiptModal } from './ReceiptModal';
 
 interface PosViewProps {
@@ -77,9 +84,55 @@ export const PosView: React.FC<PosViewProps> = ({
   const [isPrintingBt, setIsPrintingBt] = useState<boolean>(false);
   const [btPrintStatus, setBtPrintStatus] = useState<string | null>(null);
 
-  // Filter menu items
+  // Visual Warning & Stock Notification States
+  const [isLowStockBannerDismissed, setIsLowStockBannerDismissed] = useState<boolean>(false);
+  const [isLowStockDetailsExpanded, setIsLowStockDetailsExpanded] = useState<boolean>(false);
+  const [stockAlertToast, setStockAlertToast] = useState<{
+    itemName: string;
+    remainingStock: number;
+    unit: string;
+    minStock: number;
+    isOut: boolean;
+  } | null>(null);
+
+  // Auto-dismiss stock alert toast after 4.5 seconds
+  useEffect(() => {
+    if (!stockAlertToast) return;
+    const timer = setTimeout(() => {
+      setStockAlertToast(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [stockAlertToast]);
+
+  // Low Stock Items (stok mencapai atau di bawah titik minimum)
+  const lowStockItems = useMemo(() => {
+    return menuItems.filter(item => {
+      const minThreshold = typeof item.minStock === 'number' ? item.minStock : 5;
+      return item.isActive && item.stock <= minThreshold;
+    });
+  }, [menuItems]);
+
+  const outOfStockItems = useMemo(() => {
+    return lowStockItems.filter(item => item.stock <= 0);
+  }, [lowStockItems]);
+
+  const criticalStockItems = useMemo(() => {
+    return lowStockItems.filter(item => item.stock > 0);
+  }, [lowStockItems]);
+
+  // Filter menu items (dukung filter kategori khusus '⚠️ Stok Menipis')
   const filteredMenu = useMemo(() => {
     return menuItems.filter(item => {
+      const minThreshold = typeof item.minStock === 'number' ? item.minStock : 5;
+      const isLow = item.stock <= minThreshold;
+
+      if (selectedCategory === '⚠️ Stok Menipis') {
+        const matchSearch =
+          item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.category.toLowerCase().includes(searchQuery.toLowerCase());
+        return isLow && matchSearch && item.isActive;
+      }
+
       const matchCat = selectedCategory === 'Semua' || item.category === selectedCategory;
       const matchSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -104,7 +157,28 @@ export const PosView: React.FC<PosViewProps> = ({
 
   // Handle menu click
   const handleMenuClick = (item: MenuItem) => {
-    if (item.stock <= 0) return;
+    const minThreshold = typeof item.minStock === 'number' ? item.minStock : 5;
+
+    if (item.stock <= 0) {
+      setStockAlertToast({
+        itemName: item.name,
+        remainingStock: 0,
+        unit: item.unit,
+        minStock: minThreshold,
+        isOut: true,
+      });
+      return;
+    }
+
+    if (item.stock <= minThreshold) {
+      setStockAlertToast({
+        itemName: item.name,
+        remainingStock: item.stock,
+        unit: item.unit,
+        minStock: minThreshold,
+        isOut: false,
+      });
+    }
 
     if (item.allowSpicyLevel) {
       setSpicyModalItem(item);
@@ -133,6 +207,17 @@ export const PosView: React.FC<PosViewProps> = ({
     spicyLevelLabel: string,
     note: string
   ) => {
+    const minThreshold = typeof item.minStock === 'number' ? item.minStock : 5;
+    if (item.stock <= minThreshold) {
+      setStockAlertToast({
+        itemName: item.name,
+        remainingStock: item.stock,
+        unit: item.unit,
+        minStock: minThreshold,
+        isOut: false,
+      });
+    }
+
     setCart(prev => {
       const itemCartId = `${item.id}-lvl${spicyLevel}-${note.trim().toLowerCase()}`;
       const existingIdx = prev.findIndex(ci => ci.id === itemCartId);
@@ -306,6 +391,149 @@ export const PosView: React.FC<PosViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left Side: Menu Catalog (Cols 7 on Desktop) */}
         <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-4">
+
+          {/* --- INDIKATOR PERINGATAN VISUAL / NOTIFIKASI STOK MINIMUM --- */}
+          {lowStockItems.length > 0 && !isLowStockBannerDismissed && (
+            <div className="bg-gradient-to-r from-amber-950/70 via-stone-900 to-amber-950/40 border border-amber-500/70 rounded-2xl p-3.5 sm:p-4 shadow-xl shadow-amber-950/30 relative overflow-hidden transition-all animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0 mt-0.5">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 animate-pulse" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-extrabold text-sm sm:text-base text-amber-200 flex items-center gap-1.5">
+                        <span>Peringatan Stok Menu / Bahan Baku Menipis</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          {lowStockItems.length} Bahan
+                        </span>
+                      </h3>
+                    </div>
+                    <p className="text-xs text-stone-300 mt-1 leading-relaxed">
+                      Terdapat <strong className="text-amber-300">{lowStockItems.length} menu</strong> yang telah mencapai atau berada di bawah titik minimum stok.
+                      {outOfStockItems.length > 0 && (
+                        <span className="text-red-400 ml-1 font-bold">({outOfStockItems.length} menu sudah habis!)</span>
+                      )}
+                      {' '}Segera persiapkan bahan baku atau lakukan restock di dapur.
+                    </p>
+
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setIsLowStockDetailsExpanded(!isLowStockDetailsExpanded)}
+                        className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 border border-amber-600/60 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+                      >
+                        {isLowStockDetailsExpanded ? (
+                          <>
+                            <ChevronUp className="w-3.5 h-3.5" />
+                            <span>Tutup Daftar Bahan</span>
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-3.5 h-3.5" />
+                            <span>Lihat Daftar Bahan Menipis ({lowStockItems.length})</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCategory(selectedCategory === '⚠️ Stok Menipis' ? 'Semua' : '⚠️ Stok Menipis');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 ${
+                          selectedCategory === '⚠️ Stok Menipis'
+                            ? 'bg-amber-500 text-stone-950 font-black shadow-md'
+                            : 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-200 border border-amber-500/40'
+                        }`}
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                        <span>{selectedCategory === '⚠️ Stok Menipis' ? 'Tampilkan Semua Menu' : 'Filter Menu Kritis di POS'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsLowStockBannerDismissed(true)}
+                  className="p-1 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors shrink-0"
+                  title="Sembunyikan ke bar ringkas"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Rincian item yang mencapai stok minimum */}
+              {isLowStockDetailsExpanded && (
+                <div className="mt-3.5 pt-3 border-t border-amber-900/60 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {lowStockItems.map(item => {
+                    const itemMin = item.minStock ?? 5;
+                    const isZero = item.stock <= 0;
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          setSearchQuery(item.name);
+                          setSelectedCategory('Semua');
+                        }}
+                        className="p-2.5 rounded-xl bg-stone-950/80 border border-amber-900/50 hover:border-amber-500/70 cursor-pointer transition-all flex items-center justify-between gap-2 group"
+                        title="Klik untuk menyorot menu ini"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-xs text-stone-100 group-hover:text-amber-300 truncate transition-colors">
+                            {item.name}
+                          </div>
+                          <div className="text-[10px] text-stone-400">{item.category}</div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span
+                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${
+                              isZero
+                                ? 'bg-red-950 text-red-300 border border-red-800'
+                                : 'bg-amber-950 text-amber-300 border border-amber-800'
+                            }`}
+                          >
+                            {isZero ? 'HABIS (0)' : `Sisa ${item.stock}/${itemMin}`}
+                          </span>
+                          <span className="block text-[9px] text-stone-500">{item.unit}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bar ringkas saat banner ditutup */}
+          {lowStockItems.length > 0 && isLowStockBannerDismissed && (
+            <div className="bg-amber-950/40 border border-amber-800/70 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2 shadow-md">
+              <div className="flex items-center gap-2 text-xs text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                <span className="font-semibold">
+                  Perhatian: {lowStockItems.length} menu mencapai titik minimum stok
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('⚠️ Stok Menipis')}
+                  className="text-xs text-amber-400 hover:text-amber-200 underline font-bold"
+                >
+                  Filter POS
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsLowStockBannerDismissed(false)}
+                  className="text-xs px-2.5 py-0.5 rounded-lg bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-700/60 font-semibold"
+                >
+                  Buka Peringatan
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Search & Category Filter */}
           <div className="bg-stone-900 border border-stone-800 rounded-2xl p-3 sm:p-4 shadow-md flex flex-col gap-3">
             {/* Search input */}
@@ -343,6 +571,22 @@ export const PosView: React.FC<PosViewProps> = ({
                   {cat === 'Seblak' ? '🔥 Seblak' : cat === 'Topping' ? '🥟 Topping' : cat === 'Minuman' ? '🥤 Minuman' : cat === 'Paket' ? '⭐ Paket' : 'Semua Menu'}
                 </button>
               ))}
+
+              {/* Dynamic Tab: Menu Stok Menipis */}
+              {lowStockItems.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory(selectedCategory === '⚠️ Stok Menipis' ? 'Semua' : '⚠️ Stok Menipis')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                    selectedCategory === '⚠️ Stok Menipis'
+                      ? 'bg-amber-600 text-white shadow-md shadow-amber-900/40 ring-1 ring-amber-400'
+                      : 'bg-amber-950/40 text-amber-300 hover:text-amber-100 hover:bg-amber-900/50 border border-amber-800/80'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                  <span>Stok Kritis ({lowStockItems.length})</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -351,22 +595,29 @@ export const PosView: React.FC<PosViewProps> = ({
             {filteredMenu.length === 0 ? (
               <div className="col-span-full py-12 text-center text-stone-500 flex flex-col items-center justify-center">
                 <UtensilsCrossedIcon className="w-10 h-10 text-stone-600 mb-2" />
-                <p className="font-medium text-sm">Tidak ada menu yang sesuai pencarian</p>
-                <p className="text-xs text-stone-600">Coba ubah kata kunci atau pilih kategori lain</p>
+                <p className="font-medium text-sm">Tidak ada menu yang sesuai kriteria</p>
+                <p className="text-xs text-stone-600">
+                  {selectedCategory === '⚠️ Stok Menipis'
+                    ? 'Bagus! Semua stok menu saat ini berada di atas titik minimum.'
+                    : 'Coba ubah kata kunci atau pilih kategori lain'}
+                </p>
               </div>
             ) : (
               filteredMenu.map(item => {
+                const minThreshold = typeof item.minStock === 'number' ? item.minStock : 5;
                 const isOutOfStock = item.stock <= 0;
-                const isLowStock = item.stock > 0 && item.stock <= 5;
+                const isLowStock = item.stock > 0 && item.stock <= minThreshold;
 
                 return (
                   <div
                     key={item.id}
                     onClick={() => handleMenuClick(item)}
-                    className={`group relative bg-stone-900/90 border rounded-2xl overflow-hidden transition-all duration-200 flex flex-col ${
+                    className={`group relative rounded-2xl overflow-hidden transition-all duration-200 flex flex-col ${
                       isOutOfStock
-                        ? 'opacity-50 border-stone-800 cursor-not-allowed'
-                        : 'border-stone-800 hover:border-rose-500/80 hover:shadow-xl hover:shadow-rose-950/20 active:scale-[0.98] cursor-pointer'
+                        ? 'opacity-60 bg-stone-900/80 border border-red-900/60 cursor-not-allowed'
+                        : isLowStock
+                        ? 'bg-gradient-to-b from-amber-950/20 via-stone-900/90 to-stone-900/90 border border-amber-500/80 hover:border-amber-400 hover:shadow-xl hover:shadow-amber-950/40 active:scale-[0.98] cursor-pointer'
+                        : 'bg-stone-900/90 border border-stone-800 hover:border-rose-500/80 hover:shadow-xl hover:shadow-rose-950/20 active:scale-[0.98] cursor-pointer'
                     }`}
                   >
                     {/* Item Image */}
@@ -377,7 +628,6 @@ export const PosView: React.FC<PosViewProps> = ({
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         loading="lazy"
                         onError={e => {
-                          // Fallback to placeholder if url fails
                           (e.target as HTMLImageElement).src =
                             'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&auto=format&fit=crop&q=80';
                         }}
@@ -390,17 +640,24 @@ export const PosView: React.FC<PosViewProps> = ({
                         </div>
                       )}
 
-                      {/* Stock badge */}
+                      {/* Stock badge with visual warning indicator */}
                       <div
-                        className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-md shadow-md ${
+                        className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-extrabold backdrop-blur-md shadow-md flex items-center gap-1 ${
                           isOutOfStock
-                            ? 'bg-red-950/90 text-red-300 border border-red-700/60'
+                            ? 'bg-red-950/95 text-red-300 border border-red-700/80'
                             : isLowStock
-                            ? 'bg-amber-950/90 text-amber-300 border border-amber-700/60'
+                            ? 'bg-amber-950/95 text-amber-300 border border-amber-500/80 ring-1 ring-amber-500/50 animate-pulse'
                             : 'bg-stone-900/80 text-stone-300 border border-stone-700/60'
                         }`}
                       >
-                        {isOutOfStock ? 'Habis' : `Sisa ${item.stock} ${item.unit}`}
+                        {isLowStock && <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />}
+                        {isOutOfStock ? (
+                          'Habis (0)'
+                        ) : isLowStock ? (
+                          <span>Sisa {item.stock}/{minThreshold} {item.unit}</span>
+                        ) : (
+                          `Sisa ${item.stock} ${item.unit}`
+                        )}
                       </div>
                     </div>
 
@@ -410,6 +667,21 @@ export const PosView: React.FC<PosViewProps> = ({
                         <h3 className="font-bold text-xs sm:text-sm text-stone-100 line-clamp-2 group-hover:text-rose-400 transition-colors">
                           {item.name}
                         </h3>
+
+                        {/* Indikator Peringatan Visual pada Kartu */}
+                        {isLowStock && (
+                          <div className="mt-1 px-1.5 py-0.5 rounded-lg bg-amber-950/70 border border-amber-700/60 text-[10px] text-amber-300 font-semibold flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span className="truncate">Stok Menipis (Min: {minThreshold} {item.unit})</span>
+                          </div>
+                        )}
+                        {isOutOfStock && (
+                          <div className="mt-1 px-1.5 py-0.5 rounded-lg bg-red-950/70 border border-red-800/60 text-[10px] text-red-300 font-semibold flex items-center gap-1">
+                            <PackageX className="w-3 h-3 text-red-400 shrink-0" />
+                            <span className="truncate">Stok Habis di Dapur</span>
+                          </div>
+                        )}
+
                         {item.description && (
                           <p className="text-[11px] text-stone-400 line-clamp-1 mt-0.5">
                             {item.description}
@@ -425,6 +697,8 @@ export const PosView: React.FC<PosViewProps> = ({
                           className={`w-6 h-6 rounded-lg flex items-center justify-center transition-colors ${
                             isOutOfStock
                               ? 'bg-stone-800 text-stone-600'
+                              : isLowStock
+                              ? 'bg-amber-500/20 text-amber-400 group-hover:bg-amber-600 group-hover:text-white'
                               : 'bg-rose-500/20 text-rose-400 group-hover:bg-rose-600 group-hover:text-white'
                           }`}
                         >
@@ -522,66 +796,89 @@ export const PosView: React.FC<PosViewProps> = ({
                   <p className="text-[11px] text-stone-600">Pilih menu di samping untuk mulai transaksi</p>
                 </div>
               ) : (
-                cart.map(item => (
-                  <div
-                    key={item.id}
-                    className="p-2.5 bg-stone-950/70 border border-stone-800/80 rounded-xl flex flex-col gap-1.5"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <h4 className="font-bold text-xs text-stone-100 truncate">{item.name}</h4>
-                        {item.spicyLevel > 0 && (
-                          <div className="flex items-center gap-1 text-[11px] text-rose-400 font-semibold mt-0.5">
-                            <Flame className="w-3 h-3 flex-shrink-0" />
-                            <span>Level {item.spicyLevel} ({item.spicyLevelLabel.split('(')[0]})</span>
+                cart.map(item => {
+                  const menuRef = menuItems.find(m => m.id === item.menuItemId);
+                  const minThreshold = menuRef ? (typeof menuRef.minStock === 'number' ? menuRef.minStock : 5) : 5;
+                  const kitchenRemaining = menuRef ? menuRef.stock - item.quantity : 999;
+                  const isNearOrBelowMin = menuRef && kitchenRemaining <= minThreshold;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-2.5 bg-stone-950/70 border rounded-xl flex flex-col gap-1.5 transition-colors ${
+                        isNearOrBelowMin
+                          ? 'border-amber-700/80 bg-amber-950/15'
+                          : 'border-stone-800/80'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-xs text-stone-100 truncate">{item.name}</h4>
+                          {item.spicyLevel > 0 && (
+                            <div className="flex items-center gap-1 text-[11px] text-rose-400 font-semibold mt-0.5">
+                              <Flame className="w-3 h-3 flex-shrink-0" />
+                              <span>Level {item.spicyLevel} ({item.spicyLevelLabel.split('(')[0]})</span>
+                            </div>
+                          )}
+                          {item.note && (
+                            <p className="text-[10px] text-amber-400/90 italic truncate">
+                              Catatan: {item.note}
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={() => removeCartItem(item.id)}
+                          className="text-stone-500 hover:text-red-400 p-0.5"
+                          title="Hapus item"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Peringatan stok dapur kritis di keranjang */}
+                      {isNearOrBelowMin && (
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/70 border border-amber-800/70 text-[10px] text-amber-300 font-semibold">
+                          <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0 animate-pulse" />
+                          <span className="truncate">
+                            {kitchenRemaining <= 0
+                              ? 'Menghabiskan seluruh stok dapur (sisa 0)!'
+                              : `Sisa stok dapur: ${kitchenRemaining} ${item.unit} (Min: ${minThreshold})`}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1 border-t border-stone-800/60">
+                        <div className="flex items-center gap-1.5 bg-stone-900 border border-stone-800 rounded-lg p-0.5">
+                          <button
+                            onClick={() => updateQuantity(item.id, -1)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-stone-400 hover:text-white hover:bg-stone-800"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="w-6 text-center text-xs font-bold text-white">
+                            {item.quantity}
+                          </span>
+                          <button
+                            onClick={() => updateQuantity(item.id, 1)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-stone-400 hover:text-white hover:bg-stone-800"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="text-xs font-extrabold text-stone-200">
+                            {formatRupiah(item.price * item.quantity)}
+                          </span>
+                          <div className="text-[10px] text-stone-500">
+                            @{formatRupiah(item.price)}
                           </div>
-                        )}
-                        {item.note && (
-                          <p className="text-[10px] text-amber-400/90 italic truncate">
-                            Catatan: {item.note}
-                          </p>
-                        )}
-                      </div>
-
-                      <button
-                        onClick={() => removeCartItem(item.id)}
-                        className="text-stone-500 hover:text-red-400 p-0.5"
-                        title="Hapus item"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-1 border-t border-stone-800/60">
-                      <div className="flex items-center gap-1.5 bg-stone-900 border border-stone-800 rounded-lg p-0.5">
-                        <button
-                          onClick={() => updateQuantity(item.id, -1)}
-                          className="w-5 h-5 rounded flex items-center justify-center text-stone-400 hover:text-white hover:bg-stone-800"
-                        >
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <span className="w-6 text-center text-xs font-bold text-white">
-                          {item.quantity}
-                        </span>
-                        <button
-                          onClick={() => updateQuantity(item.id, 1)}
-                          className="w-5 h-5 rounded flex items-center justify-center text-stone-400 hover:text-white hover:bg-stone-800"
-                        >
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-xs font-extrabold text-stone-200">
-                          {formatRupiah(item.price * item.quantity)}
-                        </span>
-                        <div className="text-[10px] text-stone-500">
-                          @{formatRupiah(item.price)}
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -597,12 +894,11 @@ export const PosView: React.FC<PosViewProps> = ({
                 <span className="text-stone-400">Diskon (Rp)</span>
                 <div className="w-28">
                   <input
-                    type="number"
-                    min="0"
-                    step="any"
+                    type="text"
+                    inputMode="numeric"
                     value={discount || ''}
                     placeholder="0"
-                    onChange={e => setDiscount(Math.max(0, Number(e.target.value)))}
+                    onChange={e => setDiscount(Math.max(0, parseNumberInput(e.target.value)))}
                     className="w-full text-right px-2 py-0.5 bg-stone-950 border border-stone-800 rounded-lg text-xs text-amber-300 font-mono focus:outline-none focus:border-amber-500"
                   />
                 </div>
@@ -793,18 +1089,23 @@ export const PosView: React.FC<PosViewProps> = ({
               {paymentMethod === 'Tunai' ? (
                 <div className="space-y-2.5 pt-2">
                   <div>
-                    <label className="text-xs font-medium text-stone-400 block mb-1">
-                      Uang Diterima dari Pelanggan (Rp):
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-stone-400">
+                        Uang Diterima dari Pelanggan (Rp):
+                      </label>
+                      <span className="text-xs font-mono font-bold text-emerald-400">
+                        {formatRupiah(parseNumberInput(cashInputRaw))}
+                      </span>
+                    </div>
                     <input
-                      type="number"
-                      min="0"
-                      step="any"
+                      type="text"
+                      inputMode="numeric"
                       value={cashInputRaw}
                       onChange={e => {
                         setCashInputRaw(e.target.value);
-                        setCashAmount(Number(e.target.value) || 0);
+                        setCashAmount(parseNumberInput(e.target.value));
                       }}
+                      placeholder="Contoh: 50.000 atau 50000"
                       className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-lg font-mono font-bold text-emerald-400 text-right focus:outline-none focus:border-emerald-500"
                     />
                   </div>
@@ -1042,6 +1343,36 @@ export const PosView: React.FC<PosViewProps> = ({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Floating Stock Alert Toast Notification */}
+      {stockAlertToast && (
+        <div className="fixed bottom-5 right-4 sm:right-6 z-50 max-w-sm w-full bg-stone-900/95 backdrop-blur-md border border-amber-500/80 rounded-2xl p-3.5 shadow-2xl shadow-amber-950/60 animate-in slide-in-from-bottom-5 fade-in flex items-start gap-3">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0 mt-0.5">
+            <AlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="font-extrabold text-xs text-amber-300">
+                {stockAlertToast.isOut ? 'Stok Telah Habis!' : 'Peringatan Stok Minimum!'}
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold bg-amber-950 text-amber-300 border border-amber-800">
+                {stockAlertToast.isOut ? '0 Sisa' : `Sisa ${stockAlertToast.remainingStock}`}
+              </span>
+            </div>
+            <p className="text-xs text-stone-200 mt-1 leading-snug">
+              Bahan menu <strong>{stockAlertToast.itemName}</strong> {stockAlertToast.isOut ? 'sudah habis (0). Tidak dapat dipesan.' : `telah mencapai titik minimum (${stockAlertToast.minStock} ${stockAlertToast.unit}). Harap segera restock!`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStockAlertToast(null)}
+            className="p-1 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 transition-colors shrink-0"
+            title="Tutup notifikasi"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
     </div>

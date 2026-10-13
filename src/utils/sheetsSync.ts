@@ -19,15 +19,93 @@ export interface SyncResult {
   timestamp: string;
 }
 
+export interface UrlValidationResult {
+  isValid: boolean;
+  warning?: string;
+  advice?: string;
+}
+
+export const validateSpreadsheetUrl = (url: string): UrlValidationResult => {
+  const trimmed = (url || '').trim();
+  if (!trimmed) {
+    return { isValid: false, warning: 'URL Google Apps Script belum diisi.' };
+  }
+  if (!trimmed.startsWith('https://')) {
+    return {
+      isValid: false,
+      warning: 'URL harus diawali dengan https://',
+      advice: 'Pastikan menyalin URL lengkap dari Google Apps Script Web App.',
+    };
+  }
+  if (trimmed.includes('docs.google.com/spreadsheets/')) {
+    return {
+      isValid: false,
+      warning: '⚠️ Anda menempel link dokumen Google Sheet biasa, BUKAN link Web App!',
+      advice: 'Silakan buka Ekstensi > Apps Script > Terapkan (Deploy) > Penerapan Baru > Aplikasi Web, lalu salin URL yang berakhiran /exec.',
+    };
+  }
+  if (trimmed.includes('script.google.com') && trimmed.includes('/edit')) {
+    return {
+      isValid: false,
+      warning: '⚠️ Ini adalah link editor Apps Script, bukan Web App!',
+      advice: 'Klik tombol biru "Terapkan (Deploy)" di kanan atas > Penerapan Baru > Aplikasi Web > Salin URL Aplikasi Web.',
+    };
+  }
+  if (trimmed.includes('/dev')) {
+    return {
+      isValid: true,
+      warning: 'Perhatian: URL ini berakhiran /dev (mode pengujian). Sebaiknya gunakan URL dari Penerapan Baru yang berakhiran /exec.',
+    };
+  }
+  if (!trimmed.includes('script.google.com/macros/s/')) {
+    return {
+      isValid: false,
+      warning: 'Format URL tidak dikenali sebagai Google Apps Script Web App.',
+      advice: 'URL yang benar berformat: https://script.google.com/macros/s/.../exec',
+    };
+  }
+  return { isValid: true };
+};
+
+export const testSpreadsheetConnection = async (url: string): Promise<{ success: boolean; message: string }> => {
+  const validation = validateSpreadsheetUrl(url);
+  if (!validation.isValid) {
+    return { success: false, message: validation.warning || 'URL tidak valid' };
+  }
+
+  try {
+    const res = await fetch(url.trim(), {
+      method: 'GET',
+    });
+    const text = await res.text();
+    if (text.includes('accounts.google.com') || text.includes('Sign in')) {
+      return {
+        success: false,
+        message: 'Gagal: Google Sheet meminta login. Pastikan saat deploy, "Yang memiliki akses" (Who has access) dipilih "Siapa saja" (Anyone).',
+      };
+    }
+    return {
+      success: true,
+      message: 'Koneksi Berhasil! URL Google Apps Script aktif dan siap menerima data.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal tes koneksi: ${err.message || 'CORS / Network Error'}. Pastikan saat deploy, "Yang memiliki akses" disetel ke "Siapa saja (Anyone)".`,
+    };
+  }
+};
+
 /**
  * Perform sync to Google Spreadsheet Web App
  */
 export const syncWithGoogleSheets = async (): Promise<SyncResult> => {
   const config = getSpreadsheetConfig();
-  if (!config.webAppUrl || !config.webAppUrl.trim().startsWith('http')) {
+  const validation = validateSpreadsheetUrl(config.webAppUrl);
+  if (!validation.isValid) {
     return {
       success: false,
-      message: 'URL Google Apps Script belum diatur. Silakan atur URL Spreadsheet di menu Pengaturan.',
+      message: `${validation.warning || 'URL Spreadsheet belum diatur.'} ${validation.advice || ''}`,
       syncedTransactionsCount: 0,
       syncedMovementsCount: 0,
       timestamp: new Date().toISOString(),
@@ -37,7 +115,7 @@ export const syncWithGoogleSheets = async (): Promise<SyncResult> => {
   if (!navigator.onLine) {
     return {
       success: false,
-      message: 'Perangkat sedang Offline. Data tersimpan di HP dan akan disinkronkan saat terhubung internet.',
+      message: 'Perangkat sedang Offline. Data tersimpan aman di HP dan akan disinkronkan saat terhubung internet.',
       syncedTransactionsCount: 0,
       syncedMovementsCount: 0,
       timestamp: new Date().toISOString(),
