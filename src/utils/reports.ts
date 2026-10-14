@@ -174,6 +174,7 @@ export const exportStockReportToExcel = (
     No: idx + 1,
     'Nama Menu / Bahan': r.menuItemName,
     Kategori: r.category,
+    'Sub Kategori': r.subCategory || '-',
     Satuan: r.unit,
     'Harga Modal (Rp)': r.costPrice,
     'Harga Jual (Rp)': r.sellingPrice,
@@ -248,7 +249,7 @@ export const exportStockReportToPDF = (
   const tableData = stockRows.map((r, idx) => [
     idx + 1,
     r.menuItemName,
-    r.category,
+    r.subCategory ? `${r.category} (${r.subCategory})` : r.category,
     r.unit,
     formatRupiah(r.costPrice),
     r.initialStock,
@@ -434,4 +435,104 @@ export const exportDailyStockReportToPDF = (
   const fileName = `Laporan_Stok_Harian_${startDate}_sd_${endDate}.pdf`;
   doc.save(fileName);
 };
+
+// --- DOWNLOAD TEMPLATE SPREADSHEET BARU ---
+export const downloadBlankSpreadsheetTemplate = (storeName: string = 'Warung Seblak Cinta') => {
+  const wb = XLSX.utils.book_new();
+
+  // 1. Data Transaksi
+  const sampleTx = [
+    {
+      'ID Transaksi': 'TX-SAMPLE-01',
+      'No Struk': 'INV-20261013-0001',
+      'Tanggal & Waktu': '2026-10-13 12:30:00',
+      'Nama Pelanggan': 'Pelanggan 1',
+      'Meja / Antrean': 'Meja 01',
+      'Tipe Pesanan': 'Dine In',
+      Subtotal: 25000,
+      Diskon: 0,
+      'Total Akhir': 25000,
+      'Metode Bayar': 'QRIS',
+      'Uang Diterima': 25000,
+      Kembalian: 0,
+      'Nama Kasir': 'Kasir Utama',
+    },
+  ];
+  const wsTx = XLSX.utils.json_to_sheet(sampleTx);
+  wsTx['!cols'] = [
+    { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 18 }, { wch: 15 },
+    { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 14 },
+    { wch: 14 }, { wch: 12 }, { wch: 16 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsTx, 'Data_Transaksi');
+
+  // 2. Item Terjual
+  const sampleItems = [
+    {
+      'ID Transaksi': 'TX-SAMPLE-01',
+      'No Struk': 'INV-20261013-0001',
+      Tanggal: '2026-10-13',
+      'Nama Menu': 'Seblak Komplit Spesial',
+      Kategori: 'Seblak Kuah',
+      Jumlah: 1,
+      Satuan: 'Porsi',
+      'Harga Satuan': 25000,
+      Subtotal: 25000,
+      'Level Pedas': 'Level 3 (Pedas Banget)',
+      'Catatan Pesanan': 'Banyak kuah',
+    },
+  ];
+  const wsItems = XLSX.utils.json_to_sheet(sampleItems);
+  wsItems['!cols'] = [
+    { wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 24 }, { wch: 16 },
+    { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 22 }, { wch: 22 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsItems, 'Item_Terjual');
+
+  // 3. Mutasi Stok
+  const sampleMutasi = [
+    {
+      'ID Mutasi': 'MUT-SAMPLE-01',
+      'Tanggal & Waktu': '2026-10-13 08:00:00',
+      'Nama Menu': 'Kerupuk Seblak Mentah',
+      'Tipe Mutasi': 'MASUK',
+      Jumlah: 50,
+      Satuan: 'Kg',
+      'Alasan / Keterangan': 'Kulakan bahan baku pasar',
+      'Dicatat Oleh': 'Owner',
+    },
+  ];
+  const wsMutasi = XLSX.utils.json_to_sheet(sampleMutasi);
+  wsMutasi['!cols'] = [
+    { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 14 },
+    { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 16 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsMutasi, 'Mutasi_Stok');
+
+  // 4. Master Menu
+  const sampleMenu = [
+    {
+      'ID Menu': 'MENU-01',
+      'Nama Menu': 'Seblak Original',
+      Kategori: 'Seblak Kuah',
+      'Harga Jual': 15000,
+      'HPP / Modal': 8000,
+      'Stok Saat Ini': 100,
+      'Batas Minimum Stok': 10,
+      Satuan: 'Porsi',
+      'Status Aktif': 'Aktif',
+      'Terakhir Diperbarui': '2026-10-13',
+    },
+  ];
+  const wsMenu = XLSX.utils.json_to_sheet(sampleMenu);
+  wsMenu['!cols'] = [
+    { wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 14 },
+    { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 20 }
+  ];
+  XLSX.utils.book_append_sheet(wb, wsMenu, 'Master_Menu');
+
+  const cleanName = storeName.replace(/[^a-zA-Z0-9]/g, '_');
+  XLSX.writeFile(wb, `Template_Google_Sheets_${cleanName}.xlsx`);
+};
+
 

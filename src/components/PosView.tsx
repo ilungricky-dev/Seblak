@@ -24,6 +24,7 @@ import {
   X,
   Bluetooth,
   Receipt,
+  Tag,
 } from 'lucide-react';
 import {
   MenuItem,
@@ -37,7 +38,7 @@ import {
 } from '../types';
 import { SPICY_LEVELS } from '../utils/defaultData';
 import { formatRupiah, printViaBrowser, generateEscPosCommands, printRawToBluetooth, isBluetoothConnected } from '../utils/printer';
-import { createTransaction } from '../utils/storage';
+import { createTransaction, getCategories } from '../utils/storage';
 import { parseNumberInput, formatNumberWithDots } from '../utils/numberUtils';
 import { ReceiptModal } from './ReceiptModal';
 
@@ -58,6 +59,7 @@ export const PosView: React.FC<PosViewProps> = ({
   onOpenPrinterModal,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('Semua');
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string>('Semua');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState<string>('');
@@ -120,7 +122,7 @@ export const PosView: React.FC<PosViewProps> = ({
     return lowStockItems.filter(item => item.stock > 0);
   }, [lowStockItems]);
 
-  // Filter menu items (dukung filter kategori khusus '⚠️ Stok Menipis')
+  // Filter menu items (dukung filter kategori khusus '⚠️ Stok Menipis' & Sub Kategori)
   const filteredMenu = useMemo(() => {
     return menuItems.filter(item => {
       const minThreshold = typeof item.minStock === 'number' ? item.minStock : 5;
@@ -129,17 +131,22 @@ export const PosView: React.FC<PosViewProps> = ({
       if (selectedCategory === '⚠️ Stok Menipis') {
         const matchSearch =
           item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.category.toLowerCase().includes(searchQuery.toLowerCase());
+          item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (item.subCategory && item.subCategory.toLowerCase().includes(searchQuery.toLowerCase()));
         return isLow && matchSearch && item.isActive;
       }
 
       const matchCat = selectedCategory === 'Semua' || item.category === selectedCategory;
+      const matchSub =
+        selectedSubCategory === 'Semua' ||
+        (item.subCategory && item.subCategory === selectedSubCategory);
       const matchSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchCat && matchSearch && item.isActive;
+        item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.subCategory && item.subCategory.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchCat && matchSub && matchSearch && item.isActive;
     });
-  }, [menuItems, selectedCategory, searchQuery]);
+  }, [menuItems, selectedCategory, selectedSubCategory, searchQuery]);
 
   // Calculations
   const subtotal = useMemo(() => {
@@ -233,6 +240,8 @@ export const PosView: React.FC<PosViewProps> = ({
           id: itemCartId,
           menuItemId: item.id,
           name: item.name,
+          category: item.category,
+          subCategory: item.subCategory || '',
           price: item.price,
           costPrice: item.costPrice,
           quantity: 1,
@@ -378,13 +387,17 @@ export const PosView: React.FC<PosViewProps> = ({
     window.open(`https://api.whatsapp.com/send?text=${message}`, '_blank');
   };
 
-  const categories: (ProductCategory | 'Semua')[] = [
-    'Semua',
-    'Seblak',
-    'Topping',
-    'Minuman',
-    'Paket',
-  ];
+  const categoriesList = useMemo(() => {
+    return getCategories();
+  }, [menuItems]);
+
+  const posCategories = useMemo(() => {
+    return ['Semua', ...categoriesList.map(c => c.name)];
+  }, [categoriesList]);
+
+  const activePosCategoryObj = useMemo(() => {
+    return categoriesList.find(c => c.name.toLowerCase() === selectedCategory.toLowerCase());
+  }, [categoriesList, selectedCategory]);
 
   return (
     <div className="max-w-7xl mx-auto px-2 sm:px-6 py-4">
@@ -558,25 +571,35 @@ export const PosView: React.FC<PosViewProps> = ({
 
             {/* Category tabs */}
             <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
-              {categories.map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                    selectedCategory === cat
-                      ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
-                      : 'bg-stone-950 text-stone-400 hover:text-stone-200 hover:bg-stone-800 border border-stone-800/80'
-                  }`}
-                >
-                  {cat === 'Seblak' ? '🔥 Seblak' : cat === 'Topping' ? '🥟 Topping' : cat === 'Minuman' ? '🥤 Minuman' : cat === 'Paket' ? '⭐ Paket' : 'Semua Menu'}
-                </button>
-              ))}
+              {posCategories.map(cat => {
+                const catObj = categoriesList.find(c => c.name === cat);
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      setSelectedCategory(cat);
+                      setSelectedSubCategory('Semua');
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                      selectedCategory === cat
+                        ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
+                        : 'bg-stone-950 text-stone-400 hover:text-stone-200 hover:bg-stone-800 border border-stone-800/80'
+                    }`}
+                  >
+                    {catObj?.icon && <span>{catObj.icon}</span>}
+                    <span>{cat === 'Semua' ? 'Semua Menu' : cat}</span>
+                  </button>
+                );
+              })}
 
               {/* Dynamic Tab: Menu Stok Menipis */}
               {lowStockItems.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setSelectedCategory(selectedCategory === '⚠️ Stok Menipis' ? 'Semua' : '⚠️ Stok Menipis')}
+                  onClick={() => {
+                    setSelectedCategory(selectedCategory === '⚠️ Stok Menipis' ? 'Semua' : '⚠️ Stok Menipis');
+                    setSelectedSubCategory('Semua');
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                     selectedCategory === '⚠️ Stok Menipis'
                       ? 'bg-amber-600 text-white shadow-md shadow-amber-900/40 ring-1 ring-amber-400'
@@ -588,6 +611,43 @@ export const PosView: React.FC<PosViewProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Sub-Category filter pills in POS */}
+            {activePosCategoryObj && activePosCategoryObj.subCategories && activePosCategoryObj.subCategories.length > 0 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pt-2 border-t border-stone-800/60">
+                <span className="text-[10px] font-bold text-stone-500 whitespace-nowrap mr-0.5 flex items-center gap-1">
+                  <Tag className="w-3 h-3 text-amber-400" />
+                  <span>Sub:</span>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedSubCategory('Semua')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                    selectedSubCategory === 'Semua'
+                      ? 'bg-amber-600 text-white shadow-sm ring-1 ring-amber-400'
+                      : 'bg-stone-950 text-stone-400 hover:text-stone-200 border border-stone-800'
+                  }`}
+                >
+                  Semua Sub
+                </button>
+
+                {activePosCategoryObj.subCategories.map(sub => (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => setSelectedSubCategory(sub.name)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                      selectedSubCategory === sub.name
+                        ? 'bg-amber-600 text-white shadow-sm ring-1 ring-amber-400'
+                        : 'bg-stone-950 text-stone-400 hover:text-stone-200 border border-stone-800'
+                    }`}
+                  >
+                    {sub.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Menu Items Grid */}
@@ -667,6 +727,11 @@ export const PosView: React.FC<PosViewProps> = ({
                         <h3 className="font-bold text-xs sm:text-sm text-stone-100 line-clamp-2 group-hover:text-rose-400 transition-colors">
                           {item.name}
                         </h3>
+
+                        <div className="flex items-center gap-1 text-[10px] text-stone-400 mt-0.5">
+                          <span>{item.category}</span>
+                          {item.subCategory && <span className="text-amber-400/90 font-medium">• {item.subCategory}</span>}
+                        </div>
 
                         {/* Indikator Peringatan Visual pada Kartu */}
                         {isLowStock && (

@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Menu item products, prices, stock and details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "subCategory": { "type": "string" },
+        "price": { "type": "number" },
+        "costPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "unit": { "type": "string" },
+        "allowSpicyLevel": { "type": "boolean" },
+        "defaultSpicyLevel": { "type": "number" },
+        "imageUrl": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "description": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "price", "stock", "unit", "isActive"]
+    },
+    "CategoryItem": {
+      "title": "CategoryItem",
+      "description": "Product categories and subcategories",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "icon": { "type": "string" },
+        "color": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "POS cashier sales transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "receiptNo": { "type": "string" },
+        "customerName": { "type": "string" },
+        "tableOrQueueNo": { "type": "string" },
+        "orderType": { "type": "string" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "total": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "changeAmount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "cashierName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "receiptNo", "total", "paymentMethod", "createdAt"]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Inventory stock movement (in, manual out, sales)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "menuItemId": { "type": "string" },
+        "menuItemName": { "type": "string" },
+        "type": { "type": "string" },
+        "quantity": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "currentStock": { "type": "number" },
+        "reason": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "menuItemId", "type", "quantity", "createdAt"]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Staff and owner account profiles and permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "isOwner": { "type": "boolean" },
+        "phone": { "type": "string" },
+        "pin": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "role", "pin", "isActive"]
+    },
+    "AccessLogItem": {
+      "title": "AccessLogItem",
+      "description": "Audit log of user logins and actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "role": { "type": "string" },
+        "action": { "type": "string" },
+        "actionTitle": { "type": "string" },
+        "details": { "type": "string" },
+        "deviceInfo": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "employeeName", "action", "timestamp"]
+    },
+    "StoreProfile": {
+      "title": "StoreProfile",
+      "description": "Store profile, logo and settings",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "slogan": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "receiptFooter": { "type": "string" }
+      },
+      "required": ["name"]
+    }
+  },
+  "firestore": {
+    "/menuItems/{itemId}": {
+      "schema": "MenuItem",
+      "description": "Catalog of food and beverage menu items"
+    },
+    "/categories/{categoryId}": {
+      "schema": "CategoryItem",
+      "description": "Product categories and subcategories"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "POS sales transactions"
+    },
+    "/stockMovements/{movementId}": {
+      "schema": "StockMovement",
+      "description": "Stock movements in, out, and sales"
+    },
+    "/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Employee and staff accounts"
+    },
+    "/accessLogs/{logId}": {
+      "schema": "AccessLogItem",
+      "description": "Access logs and audit trails"
+    },
+    "/settings/{settingId}": {
+      "schema": "StoreProfile",
+      "description": "Store configuration and profile"
+    }
+  }
+}

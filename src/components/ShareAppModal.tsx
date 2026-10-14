@@ -12,7 +12,9 @@ import {
   ShieldCheck,
   Sparkles,
   Wifi,
+  FileSpreadsheet,
 } from 'lucide-react';
+import { getSpreadsheetConfig } from '../utils/storage';
 
 interface ShareAppModalProps {
   isOpen: boolean;
@@ -26,18 +28,28 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
   appName = 'Warung Seblak "Cinta"',
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
+  const [includeSpreadsheet, setIncludeSpreadsheet] = useState<boolean>(true);
 
   if (!isOpen) return null;
+
+  const spreadsheetConfig = getSpreadsheetConfig();
+  const hasSpreadsheet = Boolean(spreadsheetConfig?.webAppUrl);
 
   // Use the canonical production shared URL, or fallback to current origin if in web view
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const defaultLiveUrl = 'https://ais-pre-piptb5atesjniopug2utxd-592454551214.asia-east1.run.app';
   
-  // Choose the best link to share
-  const shareUrl =
+  // Choose the best base link to share
+  const baseShareUrl =
     currentOrigin && !currentOrigin.includes('localhost') && !currentOrigin.includes('127.0.0.1')
       ? currentOrigin
       : defaultLiveUrl;
+
+  // Final URL with auto-connect parameter if spreadsheet is enabled
+  const shareUrl =
+    hasSpreadsheet && includeSpreadsheet
+      ? `${baseShareUrl}?sheetsUrl=${encodeURIComponent(spreadsheetConfig.webAppUrl)}`
+      : baseShareUrl;
 
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(
     shareUrl
@@ -63,7 +75,11 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
   };
 
   const handleWhatsAppShare = () => {
-    const message = `Halo! Ini link untuk buka Aplikasi Kasir POS ${appName} di HP:\n\n${shareUrl}\n\nSilakan buka di Google Chrome atau Safari HP kamu, lalu masukkan PIN staf masing-masing.`;
+    const sheetNote =
+      hasSpreadsheet && includeSpreadsheet
+        ? '\n\n✅ Link ini sudah otomatis terhubung ke Google Spreadsheet Warung!'
+        : '';
+    const message = `Halo! Ini link untuk buka Aplikasi Kasir POS ${appName} di HP:\n\n${shareUrl}${sheetNote}\n\nSilakan buka di Google Chrome atau Safari HP kamu, lalu masukkan PIN staf masing-masing.`;
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -108,9 +124,31 @@ export const ShareAppModal: React.FC<ShareAppModalProps> = ({
 
         {/* Link Box */}
         <div className="space-y-3">
+          {hasSpreadsheet && (
+            <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/70 flex items-center justify-between gap-2.5 text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+                <div className="min-w-0">
+                  <span className="font-bold text-emerald-300 block truncate">
+                    Tautkan Spreadsheet Otomatis (Auto-Connect)
+                  </span>
+                  <span className="text-[10px] text-stone-400 block leading-tight">
+                    HP karyawan otomatis tersambung ke Google Spreadsheet saat link dibuka
+                  </span>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={includeSpreadsheet}
+                onChange={e => setIncludeSpreadsheet(e.target.checked)}
+                className="w-4 h-4 accent-emerald-500 rounded cursor-pointer shrink-0"
+              />
+            </div>
+          )}
+
           <div>
             <label className="text-[11px] font-bold text-stone-400 uppercase tracking-wider block mb-1">
-              Link Web Kasir:
+              Link Web Kasir {hasSpreadsheet && includeSpreadsheet ? '(Dengan Auto-Connect Spreadsheet)' : ''}:
             </label>
             <div className="flex items-center gap-2 bg-stone-950 border border-stone-800 rounded-xl p-2">
               <input

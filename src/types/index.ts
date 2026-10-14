@@ -1,4 +1,21 @@
-export type ProductCategory = 'Seblak' | 'Topping' | 'Minuman' | 'Paket' | 'Lainnya';
+export type ProductCategory = string;
+
+export interface SubCategoryItem {
+  id: string;
+  name: string;
+  categoryId: string;
+  description?: string;
+}
+
+export interface CategoryItem {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+  description?: string;
+  subCategories: SubCategoryItem[];
+  createdAt?: string;
+}
 
 export type UnitType = 'Porsi' | 'Pcs' | 'Gelas' | 'Bungkus' | 'Mangkok' | 'Butir';
 
@@ -6,6 +23,7 @@ export interface MenuItem {
   id: string;
   name: string;
   category: ProductCategory;
+  subCategory?: string; // Sub-kategori produk (misal: "Komplit & Spesial", "Kuah Nyemek", "Dumpling", dll)
   price: number;
   costPrice: number; // Harga modal/beli untuk hitung laba
   stock: number;
@@ -23,6 +41,8 @@ export interface CartItem {
   id: string; // unique item in cart (item + level + note)
   menuItemId: string;
   name: string;
+  category?: string;
+  subCategory?: string;
   price: number;
   costPrice: number;
   quantity: number;
@@ -106,12 +126,14 @@ export interface SpreadsheetConfig {
   lastSyncedAt?: string;
   lastSyncStatus?: 'success' | 'failed' | 'idle';
   lastSyncError?: string;
+  hasPulledInitialData?: boolean; // True jika sudah pernah menarik data awal dari spreadsheet
 }
 
 export interface AccumulatedStockRow {
   menuItemId: string;
   menuItemName: string;
   category: ProductCategory;
+  subCategory?: string;
   unit: UnitType;
   costPrice: number;
   sellingPrice: number;
@@ -133,6 +155,7 @@ export type AppFeature =
   | 'report_sales'
   | 'report_stock'
   | 'employees'
+  | 'access_log'
   | 'printer'
   | 'store_profile'
   | 'spreadsheet_sync'
@@ -160,6 +183,35 @@ export interface DailyStockAccumulationRow {
   accumulatedIn: number; // Akumulasi stok masuk
   accumulatedOut: number; // Akumulasi stock keluar
   endingStock: number; // Stock akhir
+}
+
+export type LogActionType =
+  | 'LOGIN'
+  | 'LOGOUT'
+  | 'PAGE_ACCESS'
+  | 'TRANSACTION_CREATE'
+  | 'STOCK_IN'
+  | 'STOCK_OUT'
+  | 'MENU_CREATE'
+  | 'MENU_UPDATE'
+  | 'MENU_DELETE'
+  | 'CATEGORY_CHANGE'
+  | 'DATABASE_REORGANIZE'
+  | 'SETTINGS_CHANGE'
+  | 'SPREADSHEET_SYNC'
+  | 'DATA_RESET';
+
+export interface AccessLogItem {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  action: LogActionType;
+  actionTitle: string; // Judul ringkas: "Login Berhasil", "Input Transaksi Kasir", dll
+  details: string; // Penjelasan lengkap kegiatan
+  deviceInfo: string; // Informasi perangkat HP/Laptop
+  ipOrLocation?: string; // Info koneksi/lokasi
+  timestamp: string; // ISO date string
 }
 
 

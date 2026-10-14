@@ -15,7 +15,7 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import { StoreProfile, AccumulatedStockRow, DailyStockAccumulationRow, MenuItem } from '../types';
-import { calculateAccumulatedStock, calculateDailyStockAccumulation, getMenuItems } from '../utils/storage';
+import { calculateAccumulatedStock, calculateDailyStockAccumulation, getMenuItems, getCategories } from '../utils/storage';
 import {
   exportStockReportToExcel,
   exportStockReportToPDF,
@@ -48,6 +48,11 @@ export const ReportsStockView: React.FC<ReportsStockViewProps> = ({
 
   // Menu filter for daily timeline
   const [selectedMenuId, setSelectedMenuId] = useState<string>('ALL');
+
+  // Categories list
+  const categoriesList = useMemo(() => {
+    return getCategories();
+  }, []);
 
   // Filters for by_menu mode
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
@@ -225,7 +230,7 @@ export const ReportsStockView: React.FC<ReportsStockViewProps> = ({
                 <option value="ALL">Semua Menu (Total Akumulasi Seluruh Produk)</option>
                 {menuList.map(m => (
                   <option key={m.id} value={m.id}>
-                    [{m.category}] {m.name} ({m.stock} {m.unit})
+                    [{m.category}{m.subCategory ? ` • ${m.subCategory}` : ''}] {m.name} ({m.stock} {m.unit})
                   </option>
                 ))}
               </select>
@@ -239,11 +244,11 @@ export const ReportsStockView: React.FC<ReportsStockViewProps> = ({
                   className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500"
                 >
                   <option value="ALL">Semua Kategori</option>
-                  <option value="Seblak">Seblak</option>
-                  <option value="Topping">Topping</option>
-                  <option value="Minuman">Minuman</option>
-                  <option value="Paket">Paket</option>
-                  <option value="Lainnya">Lainnya</option>
+                  {categoriesList.map(c => (
+                    <option key={c.id} value={c.name}>
+                      {c.icon || '🏷️'} {c.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -407,7 +412,10 @@ export const ReportsStockView: React.FC<ReportsStockViewProps> = ({
                         {r.menuItemName}
                       </td>
                       <td className="py-2.5 px-3 text-stone-400 whitespace-nowrap">
-                        {r.category}
+                        <span>{r.category}</span>
+                        {r.subCategory && (
+                          <span className="text-amber-400/90 text-[11px] block">{r.subCategory}</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-3 text-center text-stone-400 whitespace-nowrap">
                         {r.unit}

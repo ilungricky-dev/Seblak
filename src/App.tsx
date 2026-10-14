@@ -20,9 +20,14 @@ import {
   getSyncQueue,
   subscribeToBroadcast,
   hasFeatureAccess,
+  getSpreadsheetConfig,
+  saveSpreadsheetConfig,
+  reorganizeAndMigrateDatabase,
+  recordAccessLog,
 } from './utils/storage';
-import { syncWithGoogleSheets } from './utils/sheetsSync';
+import { syncWithGoogleSheets, validateSpreadsheetUrl } from './utils/sheetsSync';
 import { isBluetoothConnected, getConnectedDeviceName } from './utils/printer';
+import { setupRealtimeSync, syncFirestoreAllNow } from './firebase/firestoreSync';
 
 // Components
 import { Header, ActiveTab } from './components/Header';
@@ -32,6 +37,7 @@ import { MenuManagementView } from './components/MenuManagementView';
 import { ReportsSaleView } from './components/ReportsSaleView';
 import { ReportsStockView } from './components/ReportsStockView';
 import { EmployeeManagementView } from './components/EmployeeManagementView';
+import { AccessLogView } from './components/AccessLogView';
 import { LoginScreen } from './components/LoginScreen';
 
 // Modals
@@ -143,29 +149,131 @@ export default function App() {
     };
   }, [refreshAllState]);
 
-  // Background Auto-Sync every 30 seconds if online
+  // Real-time synchronization across multiple devices via Firebase Firestore
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (navigator.onLine) {
-        const queue = getSyncQueue();
-        const unsynced = getTransactions().filter(t => !t.syncedToSheets).length;
-        if (queue.length > 0 || unsynced > 0) {
-          syncWithGoogleSheets().then(res => {
-            if (res.success) {
-              refreshAllState();
-            }
-          });
-        }
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
+    const unsubFirestore = setupRealtimeSync(() => {
+      refreshAllState();
+    });
+    return () => {
+      unsubFirestore();
+    };
   }, [refreshAllState]);
+
+  // Reorganize and validate database category & subcategory relations on app mount
+  useEffect(() => {
+    reorganizeAndMigrateDatabase();
+    refreshAllState();
+  }, []);
+
+  // Auto-connect Google Spreadsheet link when employee opens a shared link on their phone
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const sharedSheetsUrl = params.get('sheetsUrl');
+        if (sharedSheetsUrl) {
+          const decodedUrl = decodeURIComponent(sharedSheetsUrl).trim();
+          const validation = validateSpreadsheetUrl(decodedUrl);
+          if (validation.isValid) {
+            const currentCfg = getSpreadsheetConfig();
+            const updatedCfg = {
+              ...currentCfg,
+              webAppUrl: decodedUrl,
+              autoSync: true,
+            };
+            saveSpreadsheetConfig(updatedCfg);
+            refreshAllState();
+
+            // Notify employee
+            setTimeout(() => {
+              alert(
+                '✅ Berhasil Menghubungkan Google Spreadsheet!\n\nHP ini telah otomatis terhubung ke Spreadsheet Warung yang dibagikan. Semua transaksi kasir akan langsung disinkronkan.'
+              );
+            }, 500);
+
+            // Clean the query parameter from URL without reloading
+            const cleanPath = window.location.pathname;
+            window.history.replaceState({}, document.title, cleanPath);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse sheetsUrl query parameter:', err);
+      }
+    }
+  }, [refreshAllState]);
+
+  // Dynamic Background Auto-Sync based on user-configured interval (seconds/minutes)
+  useEffect(() => {
+    let timerId: any = null;
+
+    const scheduleNextSync = () => {
+      const cfg = getSpreadsheetConfig();
+      const intervalSec = Math.max(5, cfg.autoSyncIntervalSec || 30);
+      const intervalMs = intervalSec * 1000;
+
+      timerId = setTimeout(() => {
+        if (navigator.onLine) {
+          const currentCfg = getSpreadsheetConfig();
+          if (currentCfg.autoSync && currentCfg.webAppUrl) {
+            const queue = getSyncQueue();
+            const unsyncedTx = getTransactions().filter(t => !t.syncedToSheets).length;
+            const unsyncedMov = getStockMovements().filter(m => !m.syncedToSheets).length;
+            if (queue.length > 0 || unsyncedTx > 0 || unsyncedMov > 0) {
+              syncWithGoogleSheets().then(res => {
+                if (res.success) {
+                  refreshAllState();
+                }
+              });
+            }
+          }
+        }
+        scheduleNextSync();
+      }, intervalMs);
+    };
+
+    scheduleNextSync();
+
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [refreshAllState]);
+
+  // Quick 1-Click Direct Sync Trigger from Header (Syncs both Firestore and Google Sheets)
+  const handleDirectSync = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      // 1. Sync Firestore real-time cloud
+      await syncFirestoreAllNow();
+
+      // 2. Sync Google Sheets if configured
+      const cfg = getSpreadsheetConfig();
+      let sheetMsg = '';
+      if (cfg.webAppUrl) {
+        const res = await syncWithGoogleSheets();
+        sheetMsg = `\n\nGoogle Sheets: ${res.message}`;
+      }
+      refreshAllState();
+      alert(`✅ Sinkronisasi multi-perangkat real-time berhasil! Semua data antar-perangkat telah saling diperbarui.${sheetMsg}`);
+    } catch (e: any) {
+      alert(`Gagal sinkron: ${e.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Transaction Completed Handler
   const handleTransactionComplete = (newTx: Transaction) => {
     setLastTxForPrint(newTx);
     refreshAllState();
+
+    // Auto-trigger background sync to Google Sheets immediately upon checkout
+    const cfg = getSpreadsheetConfig();
+    if (cfg.autoSync && cfg.webAppUrl && navigator.onLine) {
+      syncWithGoogleSheets().then(() => refreshAllState()).catch(err => {
+        console.warn('Background auto-sync on checkout notice:', err);
+      });
+    }
   };
 
   // Safe Tab Switcher with Role Authorization Check
@@ -173,6 +281,23 @@ export default function App() {
     const canAccess = hasFeatureAccess(activeEmployee, tab as AppFeature);
     if (canAccess) {
       setActiveTab(tab);
+      // Catat akses ke modul khusus untuk keperluan audit Owner
+      if (tab === 'employees' || tab === 'access_log' || tab === 'menu') {
+        try {
+          const tabLabels: Record<string, string> = {
+            employees: 'Kelola Karyawan & Hak Akses',
+            access_log: 'Log Data Akses & Audit',
+            menu: 'Kelola Menu & Kategori',
+          };
+          recordAccessLog({
+            action: 'PAGE_ACCESS',
+            actionTitle: `Akses Modul ${tabLabels[tab] || tab}`,
+            details: `${activeEmployee.name} (${activeEmployee.role}) membuka modul ${tabLabels[tab] || tab}`,
+          });
+        } catch (e) {
+          console.error('Error logging page access:', e);
+        }
+      }
     } else {
       // Show PIN authorization gate
       setAuthPromptFeature(tab);
@@ -196,12 +321,37 @@ export default function App() {
       setAuthPromptFeature(null);
       setAuthPinInput('');
       setAuthError(null);
+
+      try {
+        recordAccessLog({
+          action: 'LOGIN',
+          actionTitle: 'Otorisasi PIN Berhasil',
+          details: `${authorizedStaff.name} mengotorisasi pembukaan fitur ${authPromptFeature} untuk ${activeEmployee.name}`,
+        });
+      } catch (err) {
+        console.error(err);
+      }
     } else {
       setAuthError('PIN tidak valid atau tidak memiliki wewenang Owner/Manager!');
     }
   };
 
   const handleLogout = () => {
+    if (activeEmployee) {
+      try {
+        recordAccessLog({
+          employeeId: activeEmployee.id,
+          employeeName: activeEmployee.name,
+          role: activeEmployee.role,
+          action: 'LOGOUT',
+          actionTitle: 'Kunci Layar / Logout Shift',
+          details: `${activeEmployee.name} (${activeEmployee.role}) mengunci layar kasir`,
+        });
+      } catch (err) {
+        console.error('Error logging logout:', err);
+      }
+    }
+
     setIsLoggedIn(false);
     try {
       localStorage.removeItem('seblak_is_logged_in');
@@ -225,6 +375,20 @@ export default function App() {
               localStorage.setItem('seblak_is_logged_in', 'true');
             } catch (e) {
               console.error(e);
+            }
+
+            // Catat log login staf
+            try {
+              recordAccessLog({
+                employeeId: emp.id,
+                employeeName: emp.name,
+                role: emp.role,
+                action: 'LOGIN',
+                actionTitle: 'Login Kasir / Buka Shift',
+                details: `${emp.name} (${emp.role}) berhasil masuk menggunakan PIN`,
+              });
+            } catch (err) {
+              console.error('Error logging login success:', err);
             }
 
             // If current tab is not permitted for this employee, switch to first permitted tab
@@ -275,12 +439,9 @@ export default function App() {
           }
         }}
         openSpreadsheetModal={() => {
-          if (hasFeatureAccess(activeEmployee, 'spreadsheet_sync')) {
-            setIsSpreadsheetModalOpen(true);
-          } else {
-            alert('Anda tidak memiliki izin untuk sinkronisasi Google Sheets. Hubungi Owner.');
-          }
+          setIsSpreadsheetModalOpen(true);
         }}
+        onTriggerSync={handleDirectSync}
         openResetModal={() => setIsResetModalOpen(true)}
         openShareModal={() => setIsShareModalOpen(true)}
         isBluetoothConnected={isBluetoothConnected()}
@@ -340,6 +501,14 @@ export default function App() {
               setActiveEmployeeState(emp);
             }}
             openShareModal={() => setIsShareModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'access_log' && (
+          <AccessLogView
+            employees={employees}
+            activeEmployee={activeEmployee}
+            onRefresh={refreshAllState}
           />
         )}
       </main>

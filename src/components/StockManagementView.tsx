@@ -289,7 +289,7 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
                     const isLow = item.stock <= itemMin;
                     return (
                       <option key={item.id} value={item.id}>
-                        {isLow ? '⚠️ [KRITIS] ' : ''}[{item.category}] {item.name} — Stok: {item.stock}/{itemMin} {item.unit}
+                        {isLow ? '⚠️ [KRITIS] ' : ''}[{item.category}{item.subCategory ? ` • ${item.subCategory}` : ''}] {item.name} — Stok: {item.stock}/{itemMin} {item.unit}
                       </option>
                     );
                   })}
@@ -454,7 +454,7 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
                 >
                   <div className="min-w-0 pr-2">
                     <h4 className="font-bold text-xs text-stone-200 truncate">{item.name}</h4>
-                    <span className="text-[10px] text-stone-500">{item.category} • Modal: {formatRupiah(item.costPrice)}</span>
+                    <span className="text-[10px] text-stone-500">{item.category}{item.subCategory ? ` • ${item.subCategory}` : ''} • Modal: {formatRupiah(item.costPrice)}</span>
                   </div>
 
                   <div className="text-right flex-shrink-0">
@@ -512,7 +512,7 @@ export const StockManagementView: React.FC<StockManagementViewProps> = ({
                     const isLow = item.stock <= itemMin;
                     return (
                       <option key={item.id} value={item.id}>
-                        {isLow ? '⚠️ [KRITIS] ' : ''}[{item.category}] {item.name} — Stok: {item.stock}/{itemMin} {item.unit}
+                        {isLow ? '⚠️ [KRITIS] ' : ''}[{item.category}{item.subCategory ? ` • ${item.subCategory}` : ''}] {item.name} — Stok: {item.stock}/{itemMin} {item.unit}
                       </option>
                     );
                   })}

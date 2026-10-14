@@ -10,6 +10,10 @@ import {
   Employee,
   EmployeeRole,
   AppFeature,
+  CategoryItem,
+  SubCategoryItem,
+  AccessLogItem,
+  LogActionType,
 } from '../types';
 
 import {
@@ -20,6 +24,7 @@ import {
   DEFAULT_EMPLOYEES,
   ALL_PERMISSION_KEYS,
   DEFAULT_ROLE_PRESETS,
+  DEFAULT_CATEGORIES,
 } from './defaultData';
 
 const STORAGE_KEYS = {
@@ -32,18 +37,50 @@ const STORAGE_KEYS = {
   SYNC_QUEUE: 'seblak_sync_queue',
   EMPLOYEES: 'seblak_employees',
   ACTIVE_EMPLOYEE: 'seblak_active_employee',
+  CATEGORIES: 'seblak_categories',
+  ACCESS_LOGS: 'seblak_access_logs',
 };
-
 
 // Cross-device/tab real-time sync channel
 const syncChannel = typeof window !== 'undefined' && 'BroadcastChannel' in window
   ? new BroadcastChannel('seblak_cinta_realtime_channel')
   : null;
 
-export const broadcastChange = (type: 'MENU' | 'STOCK' | 'TRANSACTION' | 'PROFILE' | 'ALL') => {
+export type StorageMutationType =
+  | 'MENU'
+  | 'STOCK'
+  | 'TRANSACTION'
+  | 'PROFILE'
+  | 'ALL'
+  | 'CATEGORY'
+  | 'LOG'
+  | 'EMPLOYEES';
+
+type StorageMutationListener = (type: StorageMutationType, data?: any) => void;
+const mutationListeners = new Set<StorageMutationListener>();
+
+export const onStorageMutation = (listener: StorageMutationListener): (() => void) => {
+  mutationListeners.add(listener);
+  return () => {
+    mutationListeners.delete(listener);
+  };
+};
+
+export const notifyMutation = (type: StorageMutationType, data?: any) => {
+  mutationListeners.forEach(fn => {
+    try {
+      fn(type, data);
+    } catch (err) {
+      console.warn('Mutation listener error:', err);
+    }
+  });
+};
+
+export const broadcastChange = (type: StorageMutationType, data?: any) => {
   if (syncChannel) {
-    syncChannel.postMessage({ type, timestamp: Date.now() });
+    syncChannel.postMessage({ type, data, timestamp: Date.now() });
   }
+  notifyMutation(type, data);
 };
 
 export const subscribeToBroadcast = (callback: (type: string) => void) => {
@@ -72,7 +109,7 @@ export const getStoreProfile = (): StoreProfile => {
 
 export const saveStoreProfile = (profile: StoreProfile): void => {
   localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
-  broadcastChange('PROFILE');
+  broadcastChange('PROFILE', profile);
 };
 
 // --- Menu Items ---
@@ -84,6 +121,7 @@ export const getMenuItems = (): MenuItem[] => {
       if (Array.isArray(parsed)) {
         return parsed.map(item => ({
           ...item,
+          subCategory: typeof item.subCategory === 'string' ? item.subCategory : '',
           minStock: typeof item.minStock === 'number' ? item.minStock : 5,
         }));
       }
@@ -98,7 +136,7 @@ export const getMenuItems = (): MenuItem[] => {
 
 export const saveMenuItems = (items: MenuItem[]): void => {
   localStorage.setItem(STORAGE_KEYS.MENU, JSON.stringify(items));
-  broadcastChange('MENU');
+  broadcastChange('MENU', items);
 };
 
 export const addMenuItem = (item: Omit<MenuItem, 'id' | 'updatedAt'>): MenuItem => {
@@ -117,12 +155,335 @@ export const updateMenuItem = (item: MenuItem): void => {
   const current = getMenuItems();
   const updated = current.map(m => (m.id === item.id ? { ...item, updatedAt: new Date().toISOString() } : m));
   saveMenuItems(updated);
+
+  try {
+    recordAccessLog({
+      action: 'MENU_UPDATE',
+      actionTitle: `Ubah Menu: ${item.name}`,
+      details: `Memperbarui data menu ${item.name} (Kategori: ${item.category}, Sub: ${item.subCategory || '-'}, Harga: Rp ${item.price.toLocaleString('id-ID')})`,
+    });
+  } catch (err) {
+    console.error('Failed to log menu update:', err);
+  }
 };
 
 export const deleteMenuItem = (id: string): void => {
   const current = getMenuItems();
+  const target = current.find(m => m.id === id);
   const updated = current.filter(m => m.id !== id);
   saveMenuItems(updated);
+
+  if (target) {
+    try {
+      recordAccessLog({
+        action: 'MENU_DELETE',
+        actionTitle: `Hapus Menu: ${target.name}`,
+        details: `Menghapus menu ${target.name} (${target.category}) dari daftar menu warung`,
+      });
+    } catch (err) {
+      console.error('Failed to log menu delete:', err);
+    }
+  }
+};
+
+// --- Categories & Sub-Categories (Manajemen & Tata Ulang Database) ---
+
+export const getCategories = (): CategoryItem[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.CATEGORIES);
+    if (data !== null) {
+      const parsed: CategoryItem[] = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(c => ({
+          ...c,
+          subCategories: Array.isArray(c.subCategories) ? c.subCategories : [],
+        }));
+      }
+    }
+  } catch (e) {
+    console.error('Error reading categories:', e);
+  }
+  // Initialize with defaults
+  saveCategories(DEFAULT_CATEGORIES);
+  return DEFAULT_CATEGORIES;
+};
+
+export const saveCategories = (categories: CategoryItem[]): void => {
+  localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+  broadcastChange('CATEGORY', categories);
+};
+
+export const addCategory = (
+  name: string,
+  description?: string,
+  icon?: string,
+  color?: string,
+  initialSubCategories?: string[]
+): CategoryItem => {
+  const current = getCategories();
+  const trimmedName = name.trim();
+  const catId = 'cat-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+
+  const subItems: SubCategoryItem[] = (initialSubCategories || [])
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map((s, idx) => ({
+      id: `sub-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+      name: s,
+      categoryId: catId,
+    }));
+
+  const newCat: CategoryItem = {
+    id: catId,
+    name: trimmedName,
+    icon: icon || '🏷️',
+    color: color || 'rose',
+    description: description?.trim() || '',
+    subCategories: subItems,
+    createdAt: new Date().toISOString(),
+  };
+
+  const updated = [...current, newCat];
+  saveCategories(updated);
+  return newCat;
+};
+
+export const updateCategory = (category: CategoryItem): void => {
+  const current = getCategories();
+  const oldCat = current.find(c => c.id === category.id);
+  const updated = current.map(c => (c.id === category.id ? category : c));
+  saveCategories(updated);
+
+  // If category name changed, cascade to menu items
+  if (oldCat && oldCat.name !== category.name) {
+    const items = getMenuItems();
+    let hasChanges = false;
+    const updatedItems = items.map(m => {
+      if (m.category === oldCat.name) {
+        hasChanges = true;
+        return { ...m, category: category.name, updatedAt: new Date().toISOString() };
+      }
+      return m;
+    });
+    if (hasChanges) {
+      saveMenuItems(updatedItems);
+    }
+  }
+};
+
+export const deleteCategory = (
+  categoryId: string,
+  reassignToCategoryName?: string
+): { success: boolean; affectedItemsCount: number; message: string } => {
+  const current = getCategories();
+  const catToDelete = current.find(c => c.id === categoryId);
+  if (!catToDelete) {
+    return { success: false, affectedItemsCount: 0, message: 'Kategori tidak ditemukan' };
+  }
+
+  const remaining = current.filter(c => c.id !== categoryId);
+  if (remaining.length === 0) {
+    return { success: false, affectedItemsCount: 0, message: 'Minimal harus ada 1 kategori aktif dalam sistem.' };
+  }
+
+  const fallbackCat = reassignToCategoryName || remaining[0].name;
+
+  // Check and update affected menu items
+  const items = getMenuItems();
+  let affectedCount = 0;
+  const updatedItems = items.map(m => {
+    if (m.category === catToDelete.name) {
+      affectedCount++;
+      return {
+        ...m,
+        category: fallbackCat,
+        subCategory: '', // reset subCategory since parent changed
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    return m;
+  });
+
+  saveCategories(remaining);
+  if (affectedCount > 0) {
+    saveMenuItems(updatedItems);
+  }
+
+  return {
+    success: true,
+    affectedItemsCount: affectedCount,
+    message: `Kategori "${catToDelete.name}" berhasil dihapus.${
+      affectedCount > 0 ? ` ${affectedCount} menu dialihkan ke kategori "${fallbackCat}".` : ''
+    }`,
+  };
+};
+
+export const addSubCategory = (
+  categoryId: string,
+  subName: string,
+  description?: string
+): SubCategoryItem | null => {
+  const current = getCategories();
+  const cat = current.find(c => c.id === categoryId);
+  if (!cat) return null;
+
+  const newSub: SubCategoryItem = {
+    id: 'sub-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    name: subName.trim(),
+    categoryId,
+    description: description?.trim() || '',
+  };
+
+  const updatedCategories = current.map(c => {
+    if (c.id === categoryId) {
+      return {
+        ...c,
+        subCategories: [...(c.subCategories || []), newSub],
+      };
+    }
+    return c;
+  });
+
+  saveCategories(updatedCategories);
+  return newSub;
+};
+
+export const updateSubCategory = (
+  categoryId: string,
+  subCategory: SubCategoryItem
+): void => {
+  const current = getCategories();
+  const cat = current.find(c => c.id === categoryId);
+  if (!cat) return;
+
+  const oldSub = cat.subCategories?.find(s => s.id === subCategory.id);
+
+  const updatedCategories = current.map(c => {
+    if (c.id === categoryId) {
+      return {
+        ...c,
+        subCategories: c.subCategories.map(s => (s.id === subCategory.id ? subCategory : s)),
+      };
+    }
+    return c;
+  });
+
+  saveCategories(updatedCategories);
+
+  // Cascade to menu items if subcategory name changed
+  if (oldSub && oldSub.name !== subCategory.name) {
+    const items = getMenuItems();
+    let hasChanges = false;
+    const updatedItems = items.map(m => {
+      if (m.category === cat.name && m.subCategory === oldSub.name) {
+        hasChanges = true;
+        return { ...m, subCategory: subCategory.name, updatedAt: new Date().toISOString() };
+      }
+      return m;
+    });
+    if (hasChanges) {
+      saveMenuItems(updatedItems);
+    }
+  }
+};
+
+export const deleteSubCategory = (
+  categoryId: string,
+  subCategoryId: string
+): { success: boolean; affectedItemsCount: number } => {
+  const current = getCategories();
+  const cat = current.find(c => c.id === categoryId);
+  if (!cat) return { success: false, affectedItemsCount: 0 };
+
+  const subToDelete = cat.subCategories?.find(s => s.id === subCategoryId);
+  if (!subToDelete) return { success: false, affectedItemsCount: 0 };
+
+  const updatedCategories = current.map(c => {
+    if (c.id === categoryId) {
+      return {
+        ...c,
+        subCategories: c.subCategories.filter(s => s.id !== subCategoryId),
+      };
+    }
+    return c;
+  });
+
+  saveCategories(updatedCategories);
+
+  // Clear subCategory for affected menu items
+  const items = getMenuItems();
+  let affectedCount = 0;
+  const updatedItems = items.map(m => {
+    if (m.category === cat.name && m.subCategory === subToDelete.name) {
+      affectedCount++;
+      return { ...m, subCategory: '', updatedAt: new Date().toISOString() };
+    }
+    return m;
+  });
+
+  if (affectedCount > 0) {
+    saveMenuItems(updatedItems);
+  }
+
+  return { success: true, affectedItemsCount: affectedCount };
+};
+
+export const resetCategoriesToDefault = (): void => {
+  saveCategories(DEFAULT_CATEGORIES);
+};
+
+// Tata Ulang & Migrasi Database:
+export const reorganizeAndMigrateDatabase = (): { migratedItems: number; categoriesCount: number } => {
+  // 1. Initialise / Ensure categories exist
+  const categories = getCategories();
+
+  // 2. Ensure menu items have valid category and subcategory
+  const items = getMenuItems();
+  let migratedCount = 0;
+
+  const defaultSubMap = new Map<string, { category: string; subCategory: string }>();
+  DEFAULT_MENU_ITEMS.forEach(m => {
+    if (m.subCategory) {
+      defaultSubMap.set(m.id, { category: m.category, subCategory: m.subCategory });
+      defaultSubMap.set(m.name.toLowerCase().trim(), { category: m.category, subCategory: m.subCategory });
+    }
+  });
+
+  const updatedItems = items.map(item => {
+    let sub = item.subCategory || '';
+    let cat = item.category || 'Lainnya';
+
+    // If subCategory missing, attempt smart auto-assignment
+    if (!sub) {
+      const match = defaultSubMap.get(item.id) || defaultSubMap.get(item.name.toLowerCase().trim());
+      if (match) {
+        sub = match.subCategory;
+        migratedCount++;
+      } else {
+        // Find if this category has a default subCategory
+        const foundCat = categories.find(c => c.name.toLowerCase() === cat.toLowerCase());
+        if (foundCat && foundCat.subCategories && foundCat.subCategories.length > 0) {
+          sub = foundCat.subCategories[0].name;
+          migratedCount++;
+        }
+      }
+    }
+
+    return {
+      ...item,
+      category: cat,
+      subCategory: sub,
+      minStock: typeof item.minStock === 'number' ? item.minStock : 5,
+    };
+  });
+
+  saveMenuItems(updatedItems);
+  broadcastChange('ALL');
+
+  return {
+    migratedItems: migratedCount,
+    categoriesCount: categories.length,
+  };
 };
 
 // --- Stock Movements ---
@@ -139,7 +500,7 @@ export const getStockMovements = (): StockMovement[] => {
 
 export const saveStockMovements = (movements: StockMovement[]): void => {
   localStorage.setItem(STORAGE_KEYS.MOVEMENTS, JSON.stringify(movements));
-  broadcastChange('STOCK');
+  broadcastChange('STOCK', movements);
 };
 
 export const recordStockIn = (
@@ -183,6 +544,17 @@ export const recordStockIn = (
   const currentMovements = getStockMovements();
   saveStockMovements([movement, ...currentMovements]);
   addToSyncQueue('STOCK_MOVEMENT', movement);
+
+  try {
+    recordAccessLog({
+      action: 'STOCK_IN',
+      actionTitle: `Mutasi Stok Masuk / Restock (${targetMenu.name})`,
+      details: `Restock bahan sebanyak ${quantity} ${targetMenu.unit}. Alasan: ${reason || 'Restock bahan'}. Stok akhir: ${newStock}`,
+    });
+  } catch (err) {
+    console.error('Failed to log restock movement:', err);
+  }
+
   return movement;
 };
 
@@ -222,6 +594,17 @@ export const recordStockManualOut = (
   const currentMovements = getStockMovements();
   saveStockMovements([movement, ...currentMovements]);
   addToSyncQueue('STOCK_MOVEMENT', movement);
+
+  try {
+    recordAccessLog({
+      action: 'STOCK_OUT',
+      actionTitle: `Mutasi Stok Keluar (${targetMenu.name})`,
+      details: `Pengeluaran manual sebanyak ${quantity} ${targetMenu.unit}. Alasan: ${reason || '-'}. Stok akhir: ${newStock}`,
+    });
+  } catch (err) {
+    console.error('Failed to log stock movement:', err);
+  }
+
   return movement;
 };
 
@@ -239,7 +622,7 @@ export const getTransactions = (): Transaction[] => {
 
 export const saveTransactions = (txs: Transaction[]): void => {
   localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(txs));
-  broadcastChange('TRANSACTION');
+  broadcastChange('TRANSACTION', txs);
 };
 
 export const createTransaction = (
@@ -297,6 +680,17 @@ export const createTransaction = (
 
   saveTransactions([newTx, ...currentTxs]);
   addToSyncQueue('TRANSACTION', newTx);
+
+  try {
+    recordAccessLog({
+      action: 'TRANSACTION_CREATE',
+      actionTitle: `Transaksi POS #${newTx.receiptNo}`,
+      details: `Kasir memproses pesanan ${newTx.customerName || 'Pelanggan'} (${newTx.items.length} item, Total Rp ${newTx.total.toLocaleString('id-ID')}, Bayar: ${newTx.paymentMethod})`,
+    });
+  } catch (err) {
+    console.error('Failed to log transaction access:', err);
+  }
+
   return newTx;
 };
 
@@ -356,6 +750,7 @@ export const calculateAccumulatedStock = (
       menuItemId: menu.id,
       menuItemName: menu.name,
       category: menu.category,
+      subCategory: menu.subCategory || '',
       unit: menu.unit,
       costPrice: menu.costPrice,
       sellingPrice: menu.price,
@@ -481,6 +876,7 @@ export const DEFAULT_SPREADSHEET_CONFIG: SpreadsheetConfig = {
   autoSync: true,
   autoSyncIntervalSec: 30,
   lastSyncStatus: 'idle',
+  hasPulledInitialData: false,
 };
 
 export const getSpreadsheetConfig = (): SpreadsheetConfig => {
@@ -495,6 +891,7 @@ export const getSpreadsheetConfig = (): SpreadsheetConfig => {
 
 export const saveSpreadsheetConfig = (config: SpreadsheetConfig): void => {
   localStorage.setItem(STORAGE_KEYS.SPREADSHEET, JSON.stringify(config));
+  broadcastChange('ALL');
 };
 
 export interface SyncQueueItem {
@@ -581,7 +978,7 @@ export const getEmployees = (): Employee[] => {
 
 export const saveEmployees = (employees: Employee[]): void => {
   localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
-  broadcastChange('ALL');
+  broadcastChange('EMPLOYEES', employees);
 };
 
 export const addEmployee = (data: Omit<Employee, 'id' | 'createdAt'>): Employee => {
@@ -717,4 +1114,342 @@ export const resetBranchData = (options: {
   }
   clearSyncQueue();
   broadcastChange('ALL');
+};
+
+// --- Fitur Backup Data Lokal ke File JSON (Bisa Digunakan Kasir & Owner) ---
+
+export interface LocalDatabaseBackupPayload {
+  app: string;
+  version: string;
+  exportedAt: string;
+  exportedBy: string;
+  deviceInfo: string;
+  data: {
+    menuItems: MenuItem[];
+    categories: CategoryItem[];
+    transactions: Transaction[];
+    stockMovements: StockMovement[];
+    storeProfile: StoreProfile;
+    printerConfig: PrinterConfig;
+    spreadsheetConfig: SpreadsheetConfig;
+    employees: Employee[];
+    accessLogs: AccessLogItem[];
+  };
+}
+
+/**
+ * Membuat cadangan lengkap database lokal ke format teks JSON
+ */
+export const exportLocalDatabaseBackup = (exportedBy?: string): string => {
+  const activeEmp = getActiveEmployee();
+  const backupObj: LocalDatabaseBackupPayload = {
+    app: 'Warung Seblak Cinta POS',
+    version: '1.2',
+    exportedAt: new Date().toISOString(),
+    exportedBy: exportedBy || `${activeEmp.name} (${activeEmp.role})`,
+    deviceInfo: getDeviceFingerprint(),
+    data: {
+      menuItems: getMenuItems(),
+      categories: getCategories(),
+      transactions: getTransactions(),
+      stockMovements: getStockMovements(),
+      storeProfile: getStoreProfile(),
+      printerConfig: getPrinterConfig(),
+      spreadsheetConfig: getSpreadsheetConfig(),
+      employees: getEmployees(),
+      accessLogs: getAccessLogs(),
+    },
+  };
+
+  try {
+    recordAccessLog({
+      action: 'DATA_RESET',
+      actionTitle: 'Cadangkan Database ke JSON',
+      details: `${backupObj.exportedBy} mengunduh file cadangan data lokal warung (.json)`,
+    });
+  } catch (err) {
+    console.error(err);
+  }
+
+  return JSON.stringify(backupObj, null, 2);
+};
+
+/**
+ * Memulihkan database lokal dari teks JSON cadangan
+ */
+export const restoreLocalDatabaseBackup = (
+  jsonString: string
+): { success: boolean; message: string; summary?: { menus: number; txs: number; movs: number } } => {
+  try {
+    const parsed = JSON.parse(jsonString);
+    const data = parsed.data || parsed; // Support both standard and legacy backups
+
+    if (!data.menuItems && !data.transactions && !data.stockMovements) {
+      return {
+        success: false,
+        message: 'Format file JSON tidak valid atau bukan file cadangan Seblak Cinta.',
+      };
+    }
+
+    if (Array.isArray(data.menuItems)) {
+      saveMenuItems(data.menuItems);
+    }
+    if (Array.isArray(data.categories)) {
+      saveCategories(data.categories);
+    }
+    if (Array.isArray(data.transactions)) {
+      saveTransactions(data.transactions);
+    }
+    if (Array.isArray(data.stockMovements)) {
+      saveStockMovements(data.stockMovements);
+    }
+    if (data.storeProfile && typeof data.storeProfile === 'object') {
+      saveStoreProfile(data.storeProfile);
+    }
+    if (data.printerConfig && typeof data.printerConfig === 'object') {
+      savePrinterConfig(data.printerConfig);
+    }
+    if (data.spreadsheetConfig && typeof data.spreadsheetConfig === 'object') {
+      saveSpreadsheetConfig(data.spreadsheetConfig);
+    }
+    if (Array.isArray(data.employees) && data.employees.length > 0) {
+      saveEmployees(data.employees);
+    }
+
+    reorganizeAndMigrateDatabase();
+    broadcastChange('ALL');
+
+    const menusCount = Array.isArray(data.menuItems) ? data.menuItems.length : 0;
+    const txsCount = Array.isArray(data.transactions) ? data.transactions.length : 0;
+    const movsCount = Array.isArray(data.stockMovements) ? data.stockMovements.length : 0;
+
+    try {
+      recordAccessLog({
+        action: 'DATA_RESET',
+        actionTitle: 'Pulihkan Data dari JSON',
+        details: `Memulihkan database lokal dari file cadangan (${menusCount} menu, ${txsCount} transaksi)`,
+      });
+    } catch (e) {
+      console.error(e);
+    }
+
+    return {
+      success: true,
+      message: `Berhasil memulihkan data: ${menusCount} menu, ${txsCount} transaksi, dan ${movsCount} mutasi stok.`,
+      summary: { menus: menusCount, txs: txsCount, movs: movsCount },
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal membaca file JSON: ${err.message || 'Format rusak'}`,
+    };
+  }
+};
+
+// --- Access Log & User Activity Audit System (Khusus Owner) ---
+
+/**
+ * Mendeteksi jenis perangkat, sistem operasi, dan browser pengguna saat ini secara ramah
+ */
+export const getDeviceFingerprint = (): string => {
+  if (typeof navigator === 'undefined') return 'Perangkat Tidak Dikenal';
+
+  const ua = navigator.userAgent || '';
+  let os = 'Perangkat';
+  let deviceType = '💻 Komputer';
+
+  if (/android/i.test(ua)) {
+    os = 'Android';
+    deviceType = '📱 HP';
+  } else if (/iPad|iPhone|iPod/.test(ua)) {
+    os = /iPad/.test(ua) ? 'iPad (iOS)' : 'iPhone (iOS)';
+    deviceType = /iPad/.test(ua) ? '📱 Tablet' : '🍎 HP';
+  } else if (/Windows NT/i.test(ua)) {
+    os = 'Windows';
+    deviceType = '💻 PC / Laptop';
+  } else if (/Macintosh|Mac OS X/i.test(ua)) {
+    os = 'macOS';
+    deviceType = '💻 Mac / MacBook';
+  } else if (/Linux/i.test(ua)) {
+    os = 'Linux';
+    deviceType = '💻 Komputer';
+  }
+
+  // Browser check
+  let browser = 'Browser';
+  if (/Edg\//i.test(ua)) {
+    browser = 'Edge';
+  } else if (/Chrome|CriOS/i.test(ua)) {
+    browser = 'Chrome';
+  } else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) {
+    browser = 'Safari';
+  } else if (/Firefox|FxiOS/i.test(ua)) {
+    browser = 'Firefox';
+  } else if (/SamsungBrowser/i.test(ua)) {
+    browser = 'Samsung Internet';
+  }
+
+  return `${deviceType} ${os} (${browser})`;
+};
+
+/**
+ * Data awal log audit jika penyimpanan masih kosong
+ */
+const getInitialSeedLogs = (): AccessLogItem[] => {
+  const now = Date.now();
+  const formatIso = (offsetMinutes: number) =>
+    new Date(now - offsetMinutes * 60 * 1000).toISOString();
+
+  return [
+    {
+      id: 'log-seed-1',
+      employeeId: 'emp-owner',
+      employeeName: 'Owner (Pemilik Warung)',
+      role: 'Owner',
+      action: 'LOGIN',
+      actionTitle: 'Login Berhasil (PIN)',
+      details: 'Pemilik warung login ke sistem kasir utama dan membuka dashboard kontrol',
+      deviceInfo: getDeviceFingerprint(),
+      ipOrLocation: 'Lokal / Wi-Fi Toko',
+      timestamp: formatIso(15),
+    },
+    {
+      id: 'log-seed-2',
+      employeeId: 'emp-owner',
+      employeeName: 'Owner (Pemilik Warung)',
+      role: 'Owner',
+      action: 'PAGE_ACCESS',
+      actionTitle: 'Buka Kelola Menu & Kategori',
+      details: 'Mengakses modul penataan kategori dan harga menu seblak',
+      deviceInfo: getDeviceFingerprint(),
+      ipOrLocation: 'Lokal / Wi-Fi Toko',
+      timestamp: formatIso(12),
+    },
+    {
+      id: 'log-seed-3',
+      employeeId: 'emp-owner',
+      employeeName: 'Owner (Pemilik Warung)',
+      role: 'Owner',
+      action: 'DATABASE_REORGANIZE',
+      actionTitle: 'Tata Ulang Database & Sub-Kategori',
+      details: 'Sinkronisasi struktur kategori & sub-kategori otomatis diperbarui',
+      deviceInfo: getDeviceFingerprint(),
+      ipOrLocation: 'Lokal / Wi-Fi Toko',
+      timestamp: formatIso(10),
+    },
+  ];
+};
+
+/**
+ * Mengambil seluruh riwayat log akses pengguna
+ */
+export const getAccessLogs = (): AccessLogItem[] => {
+  try {
+    const data = localStorage.getItem(STORAGE_KEYS.ACCESS_LOGS);
+    if (data !== null) {
+      const parsed: AccessLogItem[] = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading access logs:', e);
+  }
+
+  // Jika kosong, inisialisasi data log awal
+  const initial = getInitialSeedLogs();
+  try {
+    localStorage.setItem(STORAGE_KEYS.ACCESS_LOGS, JSON.stringify(initial));
+  } catch (e) {
+    console.error('Failed to save initial access logs:', e);
+  }
+  return initial;
+};
+
+/**
+ * Menyimpan daftar log (dibatasi 300 data terbaru agar hemat memori)
+ */
+export const saveAccessLogs = (logs: AccessLogItem[]): void => {
+  try {
+    const trimmed = logs.slice(0, 300);
+    localStorage.setItem(STORAGE_KEYS.ACCESS_LOGS, JSON.stringify(trimmed));
+    broadcastChange('LOG', trimmed);
+  } catch (e) {
+    console.error('Error saving access logs:', e);
+  }
+};
+
+/**
+ * Mencatat aktivitas / akses baru pengguna ke dalam sistem
+ */
+export const recordAccessLog = (entry: {
+  employeeId?: string;
+  employeeName?: string;
+  role?: string;
+  action: LogActionType;
+  actionTitle: string;
+  details: string;
+  deviceInfo?: string;
+  ipOrLocation?: string;
+}): AccessLogItem => {
+  const activeEmp = getActiveEmployee();
+  const currentLogs = getAccessLogs();
+
+  const newLog: AccessLogItem = {
+    id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+    employeeId: entry.employeeId || activeEmp?.id || 'emp-unknown',
+    employeeName: entry.employeeName || activeEmp?.name || 'Pengguna Tidak Dikenal',
+    role: entry.role || activeEmp?.role || 'Staf',
+    action: entry.action,
+    actionTitle: entry.actionTitle,
+    details: entry.details,
+    deviceInfo: entry.deviceInfo || getDeviceFingerprint(),
+    ipOrLocation: entry.ipOrLocation || (navigator?.onLine ? 'Online' : 'Offline (Lokal)'),
+    timestamp: new Date().toISOString(),
+  };
+
+  saveAccessLogs([newLog, ...currentLogs]);
+  return newLog;
+};
+
+/**
+ * Menghapus / membersihkan seluruh riwayat log akses (Tindakan Owner)
+ */
+export const clearAccessLogs = (): void => {
+  localStorage.setItem(STORAGE_KEYS.ACCESS_LOGS, JSON.stringify([]));
+  broadcastChange('LOG');
+};
+
+/**
+ * Mengekspor data log ke format file CSV untuk diunduh
+ */
+export const exportAccessLogsCsv = (): string => {
+  const logs = getAccessLogs();
+  const headers = ['No', 'ID Log', 'Waktu (WIB)', 'Nama Staf', 'Jabatan / Peran', 'Aksi Utama', 'Rincian Aktivitas', 'Perangkat Pengguna', 'Status Koneksi'];
+
+  const rows = logs.map((log, index) => {
+    const dateFormatted = new Date(log.timestamp).toLocaleString('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+
+    return [
+      index + 1,
+      `"${log.id}"`,
+      `"${dateFormatted}"`,
+      `"${(log.employeeName || '').replace(/"/g, '""')}"`,
+      `"${(log.role || '').replace(/"/g, '""')}"`,
+      `"${(log.actionTitle || log.action || '').replace(/"/g, '""')}"`,
+      `"${(log.details || '').replace(/"/g, '""')}"`,
+      `"${(log.deviceInfo || '').replace(/"/g, '""')}"`,
+      `"${(log.ipOrLocation || '').replace(/"/g, '""')}"`,
+    ].join(',');
+  });
+
+  return '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
 };

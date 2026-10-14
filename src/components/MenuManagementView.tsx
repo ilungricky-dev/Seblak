@@ -14,11 +14,14 @@ import {
   Sparkles,
   PackageCheck,
   PackageMinus,
+  FolderTree,
+  Tag,
 } from 'lucide-react';
-import { MenuItem, ProductCategory, UnitType } from '../types';
-import { addMenuItem, updateMenuItem, deleteMenuItem } from '../utils/storage';
+import { MenuItem, ProductCategory, UnitType, CategoryItem } from '../types';
+import { addMenuItem, updateMenuItem, deleteMenuItem, getCategories } from '../utils/storage';
 import { formatRupiah } from '../utils/printer';
 import { parseNumberInput, formatNumberWithDots } from '../utils/numberUtils';
+import { CategoryManagementModal } from './CategoryManagementModal';
 
 interface MenuManagementViewProps {
   menuItems: MenuItem[];
@@ -49,13 +52,21 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
   onMenuUpdated,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('Semua');
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string>('Semua');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+
+  // Categories list
+  const categoriesList = useMemo(() => {
+    return getCategories();
+  }, [menuItems, isCategoryModalOpen]);
 
   // Form Fields
   const [name, setName] = useState<string>('');
-  const [category, setRoleCategory] = useState<ProductCategory>('Seblak');
+  const [category, setRoleCategory] = useState<string>('Seblak');
+  const [subCategory, setSubCategory] = useState<string>('');
   const [price, setPrice] = useState<number | string>(15000);
   const [costPrice, setCostPrice] = useState<number | string>(8000);
   const [stock, setStock] = useState<number | string>(30);
@@ -65,6 +76,16 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
   const [imageUrl, setImageUrl] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [isActive, setIsActive] = useState<boolean>(true);
+
+  // Available subcategories for the selected form category
+  const formCategoryObj = useMemo(() => {
+    return categoriesList.find(c => c.name.toLowerCase() === category.toLowerCase());
+  }, [categoriesList, category]);
+
+  // Subcategories for the filter bar
+  const activeFilterCategoryObj = useMemo(() => {
+    return categoriesList.find(c => c.name.toLowerCase() === selectedCategory.toLowerCase());
+  }, [categoriesList, selectedCategory]);
 
   // Stock Notification Toast
   const [menuToast, setMenuToast] = useState<StockToastInfo | null>(null);
@@ -83,17 +104,24 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
   const filtered = useMemo(() => {
     return menuItems.filter(item => {
       const matchCat = selectedCategory === 'Semua' || item.category === selectedCategory;
+      const matchSub =
+        selectedSubCategory === 'Semua' ||
+        (item.subCategory && item.subCategory === selectedSubCategory);
       const matchSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchCat && matchSearch;
+        item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.subCategory && item.subCategory.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchCat && matchSub && matchSearch;
     });
-  }, [menuItems, selectedCategory, searchQuery]);
+  }, [menuItems, selectedCategory, selectedSubCategory, searchQuery]);
 
   const openAddModal = () => {
     setEditingItem(null);
     setName('');
-    setRoleCategory('Seblak');
+    const defaultCat = categoriesList[0]?.name || 'Seblak';
+    setRoleCategory(defaultCat);
+    const catObj = categoriesList.find(c => c.name.toLowerCase() === defaultCat.toLowerCase());
+    setSubCategory(catObj?.subCategories?.[0]?.name || '');
     setPrice(15000);
     setCostPrice(8000);
     setStock(30);
@@ -110,6 +138,7 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
     setEditingItem(item);
     setName(item.name);
     setRoleCategory(item.category);
+    setSubCategory(item.subCategory || '');
     setPrice(item.price);
     setCostPrice(item.costPrice);
     setStock(item.stock);
@@ -203,6 +232,7 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
         ...editingItem,
         name: name.trim(),
         category,
+        subCategory: subCategory.trim() || undefined,
         price: numericPrice,
         costPrice: numericCostPrice,
         stock: numericStock,
@@ -226,6 +256,7 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
       addMenuItem({
         name: name.trim(),
         category,
+        subCategory: subCategory.trim() || undefined,
         price: numericPrice,
         costPrice: numericCostPrice,
         stock: numericStock,
@@ -249,7 +280,9 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
     }
   };
 
-  const categories = ['Semua', 'Seblak', 'Topping', 'Minuman', 'Paket', 'Lainnya'];
+  const filterCategories = useMemo(() => {
+    return ['Semua', ...categoriesList.map(c => c.name)];
+  }, [categoriesList]);
 
   return (
     <div className="max-w-7xl mx-auto px-2 sm:px-6 py-4">
@@ -263,50 +296,107 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
             </h2>
           </div>
           <p className="text-xs text-stone-400 mt-1">
-            Tambah, edit, hapus menu, atur harga jual & modal, level pedas, dan upload foto langsung dari galeri HP.
+            Tambah, edit, hapus menu, atur kategori & sub-kategori, harga jual & modal, level pedas, dan upload foto langsung dari HP.
           </p>
         </div>
 
-        <button
-          onClick={openAddModal}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-rose-950/40 transition-all self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Menu Baru</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={() => setIsCategoryModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-white font-bold text-xs sm:text-sm border border-stone-700/80 transition-all shadow-md"
+            title="Buka panel pengelolaan kategori dan sub-kategori produk"
+          >
+            <FolderTree className="w-4 h-4 text-amber-400" />
+            <span>Kelola Kategori & Sub</span>
+          </button>
+
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-rose-950/40 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Menu Baru</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="bg-stone-900 border border-stone-800 rounded-2xl p-3 sm:p-4 shadow-md mb-5 flex flex-col sm:flex-row items-center justify-between gap-3">
-        {/* Category pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none w-full sm:w-auto pb-1 sm:pb-0">
-          {categories.map(cat => (
+      <div className="bg-stone-900 border border-stone-800 rounded-2xl p-3 sm:p-4 shadow-md mb-5 space-y-3">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          {/* Category pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none w-full sm:w-auto pb-1 sm:pb-0">
+            {filterCategories.map(cat => {
+              const catObj = categoriesList.find(c => c.name === cat);
+              return (
+                <button
+                  key={cat}
+                  onClick={() => {
+                    setSelectedCategory(cat);
+                    setSelectedSubCategory('Semua');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                    selectedCategory === cat
+                      ? 'bg-rose-600 text-white shadow-md'
+                      : 'bg-stone-950 text-stone-400 hover:text-stone-200 border border-stone-800'
+                  }`}
+                >
+                  {catObj?.icon && <span>{catObj.icon}</span>}
+                  <span>{cat}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search */}
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
+            <input
+              type="text"
+              placeholder="Cari menu, kategori, sub..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-500"
+            />
+          </div>
+        </div>
+
+        {/* Sub-Category filter pills (shown when category is selected or has subcategories) */}
+        {activeFilterCategoryObj && activeFilterCategoryObj.subCategories && activeFilterCategoryObj.subCategories.length > 0 && (
+          <div className="pt-2 border-t border-stone-800/60 flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+            <span className="text-[11px] font-bold text-stone-400 whitespace-nowrap mr-1 flex items-center gap-1">
+              <Tag className="w-3 h-3 text-amber-400" />
+              <span>Sub Kategori:</span>
+            </span>
+
             <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                selectedCategory === cat
-                  ? 'bg-rose-600 text-white shadow-md'
+              onClick={() => setSelectedSubCategory('Semua')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                selectedSubCategory === 'Semua'
+                  ? 'bg-amber-600 text-white shadow-sm'
                   : 'bg-stone-950 text-stone-400 hover:text-stone-200 border border-stone-800'
               }`}
             >
-              {cat}
+              Semua Sub
             </button>
-          ))}
-        </div>
 
-        {/* Search */}
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
-          <input
-            type="text"
-            placeholder="Cari nama menu..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white placeholder-stone-500 focus:outline-none focus:border-rose-500"
-          />
-        </div>
+            {activeFilterCategoryObj.subCategories.map(sub => (
+              <button
+                key={sub.id}
+                onClick={() => setSelectedSubCategory(sub.name)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-all ${
+                  selectedSubCategory === sub.name
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'bg-stone-950 text-stone-400 hover:text-stone-200 border border-stone-800'
+                }`}
+              >
+                {sub.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Menu Cards Grid */}
 
       {/* Menu Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -325,8 +415,11 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
                   alt={item.name}
                   className="w-full h-full object-cover"
                 />
-                <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-stone-950/80 backdrop-blur-md text-[10px] font-bold text-stone-300 border border-stone-700">
-                  {item.category}
+                <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-stone-950/80 backdrop-blur-md text-[10px] font-bold text-stone-300 border border-stone-700 flex items-center gap-1">
+                  <span>{item.category}</span>
+                  {item.subCategory && (
+                    <span className="text-amber-300 font-medium">• {item.subCategory}</span>
+                  )}
                 </div>
                 {item.allowSpicyLevel && (
                   <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-rose-600/90 text-white text-[10px] font-bold flex items-center gap-0.5">
@@ -505,20 +598,59 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
                 />
               </div>
 
-              {/* Kategori & Satuan */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Kategori, Sub Kategori & Satuan */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-stone-300 block mb-1">Kategori:</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-stone-300">Kategori:</label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoryModalOpen(true)}
+                      className="text-[10px] text-amber-400 hover:text-amber-300 font-bold"
+                    >
+                      + Buat Baru
+                    </button>
+                  </div>
                   <select
                     value={category}
-                    onChange={e => setRoleCategory(e.target.value as ProductCategory)}
+                    onChange={e => {
+                      const newCat = e.target.value;
+                      setRoleCategory(newCat);
+                      const catObj = categoriesList.find(c => c.name.toLowerCase() === newCat.toLowerCase());
+                      setSubCategory(catObj?.subCategories?.[0]?.name || '');
+                    }}
                     className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
                   >
-                    <option value="Seblak">Seblak</option>
-                    <option value="Topping">Topping</option>
-                    <option value="Minuman">Minuman</option>
-                    <option value="Paket">Paket</option>
-                    <option value="Lainnya">Lainnya</option>
+                    {categoriesList.map(c => (
+                      <option key={c.id} value={c.name}>
+                        {c.icon || '🏷️'} {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-stone-300">Sub Kategori:</label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoryModalOpen(true)}
+                      className="text-[10px] text-amber-400 hover:text-amber-300 font-bold"
+                    >
+                      + Kelola Sub
+                    </button>
+                  </div>
+                  <select
+                    value={subCategory}
+                    onChange={e => setSubCategory(e.target.value)}
+                    className="w-full px-3 py-2 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">(Tanpa Sub Kategori)</option>
+                    {formCategoryObj?.subCategories?.map(sub => (
+                      <option key={sub.id} value={sub.name}>
+                        {sub.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -848,6 +980,14 @@ export const MenuManagementView: React.FC<MenuManagementViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Kelola Kategori & Sub Kategori */}
+      <CategoryManagementModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        menuItems={menuItems}
+        onUpdated={onMenuUpdated}
+      />
     </div>
   );
 };

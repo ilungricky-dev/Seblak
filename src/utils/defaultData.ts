@@ -1,4 +1,4 @@
-import { MenuItem, StoreProfile, StockMovement, Transaction, Employee, AppFeature } from '../types';
+import { MenuItem, StoreProfile, StockMovement, Transaction, Employee, AppFeature, CategoryItem, SubCategoryItem } from '../types';
 
 export interface AppFeatureMeta {
   id: AppFeature;
@@ -39,6 +39,12 @@ export const ALL_APP_FEATURES: AppFeatureMeta[] = [
     category: 'Laporan & Analisis',
   },
   {
+    id: 'access_log',
+    label: 'Log Data Akses & Aktivitas Staf',
+    description: 'Pantau user siapa saja yang login, waktu akses, perangkat HP/komputer yang digunakan, dan riwayat aktivitas kasir.',
+    category: 'Laporan & Analisis',
+  },
+  {
     id: 'printer',
     label: 'Pengaturan Printer Thermal',
     description: 'Hubungkan printer thermal via Bluetooth / browser print, tes cetak, dan pilih ukuran kertas 58mm / 80mm.',
@@ -67,12 +73,12 @@ export const ALL_APP_FEATURES: AppFeatureMeta[] = [
 export const ALL_PERMISSION_KEYS: AppFeature[] = ALL_APP_FEATURES.map(f => f.id);
 
 export const DEFAULT_ROLE_PRESETS: Record<string, AppFeature[]> = {
-  Kasir: ['pos', 'report_sales', 'printer'],
-  'Koki / Dapur': ['stock', 'menu'],
-  'Barista / Minuman': ['pos', 'stock'],
-  'Pelayan / Waiter': ['pos'],
-  'Admin Keuangan': ['report_sales', 'report_stock', 'spreadsheet_sync'],
-  'Supervisor / Manager': ['pos', 'stock', 'menu', 'report_sales', 'report_stock', 'printer'],
+  Kasir: ['pos', 'report_sales', 'printer', 'spreadsheet_sync'],
+  'Koki / Dapur': ['stock', 'menu', 'spreadsheet_sync'],
+  'Barista / Minuman': ['pos', 'stock', 'spreadsheet_sync'],
+  'Pelayan / Waiter': ['pos', 'spreadsheet_sync'],
+  'Admin Keuangan': ['report_sales', 'report_stock', 'access_log', 'spreadsheet_sync'],
+  'Supervisor / Manager': ['pos', 'stock', 'menu', 'report_sales', 'report_stock', 'access_log', 'printer', 'spreadsheet_sync'],
   'Owner / Pemilik': ALL_PERMISSION_KEYS,
 };
 
@@ -115,11 +121,97 @@ export const SPICY_LEVELS = [
   { level: 5, label: 'Level 5: Cinta Mati (Pedas Mercon Gila - 10 Sendok)', color: 'text-purple-400', badge: 'bg-purple-950/60 text-purple-300 border-purple-700/50' },
 ];
 
+export const DEFAULT_CATEGORIES: CategoryItem[] = [
+  {
+    id: 'cat-seblak',
+    name: 'Seblak',
+    icon: '🔥',
+    color: 'rose',
+    description: 'Menu seblak kuah, nyemek, pedas jeletot dengan bumbu kencur medok khas Bandung',
+    subCategories: [
+      { id: 'sub-seb-1', name: 'Komplit & Spesial', categoryId: 'cat-seblak', description: 'Seblak isian lengkap komplit' },
+      { id: 'sub-seb-2', name: 'Seafood & Dumpling', categoryId: 'cat-seblak', description: 'Seblak isian dumpling keju, chikuwa & olahan laut' },
+      { id: 'sub-seb-3', name: 'Ceker & Tulang', categoryId: 'cat-seblak', description: 'Seblak ceker empuk & balungan' },
+      { id: 'sub-seb-4', name: 'Original Bandung', categoryId: 'cat-seblak', description: 'Seblak kerupuk mawar oranye & telur orak arik' },
+      { id: 'sub-seb-5', name: 'Kuah Nyemek', categoryId: 'cat-seblak', description: 'Seblak kuah kental nyemek manis gurih' },
+    ],
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'cat-topping',
+    name: 'Topping',
+    icon: '🥟',
+    color: 'amber',
+    description: 'Topping tambahan satuan: dumpling, cuanki, ceker, sosis, bakso & sayuran segar',
+    subCategories: [
+      { id: 'sub-top-1', name: 'Dumpling & Olahan Seafood', categoryId: 'cat-topping', description: 'Dumpling keju, fish roll, chikuwa' },
+      { id: 'sub-top-2', name: 'Cuanki & Kerupuk', categoryId: 'cat-topping', description: 'Cuanki lidah, cuanki tahu, kerupuk mawar' },
+      { id: 'sub-top-3', name: 'Ceker & Daging', categoryId: 'cat-topping', description: 'Ceker ayam empuk, bakso sapi urat, sosis sapi' },
+      { id: 'sub-top-4', name: 'Sayuran & Jamur', categoryId: 'cat-topping', description: 'Jamur enoki, sayur sawi hijau, tauge' },
+      { id: 'sub-top-5', name: 'Mie & Makaroni', categoryId: 'cat-topping', description: 'Mie kuning, kwetiau kenyal, makaroni spiral' },
+    ],
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'cat-minuman',
+    name: 'Minuman',
+    icon: '🥤',
+    color: 'sky',
+    description: 'Minuman dingin segar pereda rasa pedas seblak',
+    subCategories: [
+      { id: 'sub-min-1', name: 'Teh & Jeruk Segar', categoryId: 'cat-minuman', description: 'Es teh manis jumbo, es jeruk peras asli' },
+      { id: 'sub-min-2', name: 'Susu & Tea Creamy', categoryId: 'cat-minuman', description: 'Es teh tarik cincau, susu kental manis dingin' },
+      { id: 'sub-min-3', name: 'Minuman Buah & Dingin', categoryId: 'cat-minuman', description: 'Nutrisari blewah, es sirup segar' },
+      { id: 'sub-min-4', name: 'Kopi & Cokelat', categoryId: 'cat-minuman', description: 'Es kopi susu, es cokelat manis' },
+    ],
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'cat-paket',
+    name: 'Paket',
+    icon: '⭐',
+    color: 'purple',
+    description: 'Paket hemat seblak + topping + minuman bonus',
+    subCategories: [
+      { id: 'sub-pak-1', name: 'Paket Hemat / Bucin', categoryId: 'cat-paket', description: 'Paket kenyang seblak + es teh jumbo' },
+      { id: 'sub-pak-2', name: 'Paket Rame-Rame', categoryId: 'cat-paket', description: 'Paket seblak porsi besar untuk 2-3 orang' },
+      { id: 'sub-pak-3', name: 'Paket Combo Kenyang', categoryId: 'cat-paket', description: 'Paket komplit + 2 topping gratis' },
+    ],
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'cat-snack',
+    name: 'Cemilan & Snack',
+    icon: '🍟',
+    color: 'orange',
+    description: 'Cemilan pelengkap, gorengan renyah & ekstra sambal',
+    subCategories: [
+      { id: 'sub-snk-1', name: 'Gorengan Crispy', categoryId: 'cat-snack', description: 'Cireng bumbu rujak, pangsit goreng renyah' },
+      { id: 'sub-snk-2', name: 'Dimsum & Siomay', categoryId: 'cat-snack', description: 'Dimsum ayam kukus / goreng saus pedas' },
+      { id: 'sub-snk-3', name: 'Ekstra Sambal & Bumbu', categoryId: 'cat-snack', description: 'Ekstra bumbu kencur, chili oil, sambal mercon' },
+    ],
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'cat-lainnya',
+    name: 'Lainnya',
+    icon: '🏷️',
+    color: 'stone',
+    description: 'Item tambahan lain, packaging, dan bumbu pelengkap',
+    subCategories: [
+      { id: 'sub-oth-1', name: 'Bahan Tambahan', categoryId: 'cat-lainnya', description: 'Bahan pelengkap khusus' },
+      { id: 'sub-oth-2', name: 'Packaging & Kantong', categoryId: 'cat-lainnya', description: 'Paper bowl takeaway, tas kresek ramah lingkungan' },
+    ],
+    createdAt: '2024-01-01T00:00:00.000Z',
+  },
+];
+
 export const DEFAULT_MENU_ITEMS: MenuItem[] = [
   {
     id: 'menu-seb-1',
     name: 'Seblak Komplit Spesial Cinta',
     category: 'Seblak',
+    subCategory: 'Komplit & Spesial',
     price: 18000,
     costPrice: 10500,
     stock: 45,
@@ -136,6 +228,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-seb-2',
     name: 'Seblak Seafood Dumpling Keju',
     category: 'Seblak',
+    subCategory: 'Seafood & Dumpling',
     price: 22000,
     costPrice: 13000,
     stock: 35,
@@ -152,6 +245,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-seb-3',
     name: 'Seblak Ceker Judes Pedas',
     category: 'Seblak',
+    subCategory: 'Ceker & Tulang',
     price: 19000,
     costPrice: 11000,
     stock: 30,
@@ -168,6 +262,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-seb-4',
     name: 'Seblak Kerupuk Original Bandung',
     category: 'Seblak',
+    subCategory: 'Original Bandung',
     price: 14000,
     costPrice: 7500,
     stock: 50,
@@ -184,6 +279,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-top-1',
     name: 'Topping Dumpling Keju (2 pcs)',
     category: 'Topping',
+    subCategory: 'Dumpling & Olahan Seafood',
     price: 6000,
     costPrice: 3500,
     stock: 60,
@@ -199,6 +295,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-top-2',
     name: 'Topping Cuanki Lidah Crispy (3 pcs)',
     category: 'Topping',
+    subCategory: 'Cuanki & Kerupuk',
     price: 4000,
     costPrice: 2000,
     stock: 80,
@@ -214,6 +311,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-top-3',
     name: 'Topping Ceker Ayam Empuk (2 pcs)',
     category: 'Topping',
+    subCategory: 'Ceker & Daging',
     price: 5000,
     costPrice: 3000,
     stock: 40,
@@ -229,6 +327,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-top-4',
     name: 'Topping Jamur Enoki Segar',
     category: 'Topping',
+    subCategory: 'Sayuran & Jamur',
     price: 5000,
     costPrice: 3000,
     stock: 3, // Menipis / di bawah minimum 5
@@ -244,6 +343,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-top-5',
     name: 'Topping Bakso Sapi Urat (3 pcs)',
     category: 'Topping',
+    subCategory: 'Ceker & Daging',
     price: 6000,
     costPrice: 3500,
     stock: 75,
@@ -259,6 +359,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-min-1',
     name: 'Es Teh Manis Jumbo',
     category: 'Minuman',
+    subCategory: 'Teh & Jeruk Segar',
     price: 4000,
     costPrice: 1500,
     stock: 120,
@@ -274,6 +375,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-min-2',
     name: 'Es Jeruk Peras Segar',
     category: 'Minuman',
+    subCategory: 'Teh & Jeruk Segar',
     price: 6000,
     costPrice: 3000,
     stock: 50,
@@ -289,6 +391,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-min-3',
     name: 'Es Teh Tarik Dingin Cinta',
     category: 'Minuman',
+    subCategory: 'Susu & Tea Creamy',
     price: 8000,
     costPrice: 4000,
     stock: 40,
@@ -304,6 +407,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-min-4',
     name: 'Nutrisari Blewah Dingin',
     category: 'Minuman',
+    subCategory: 'Minuman Buah & Dingin',
     price: 5000,
     costPrice: 2000,
     stock: 4, // Menipis / di bawah minimum 5
@@ -319,6 +423,7 @@ export const DEFAULT_MENU_ITEMS: MenuItem[] = [
     id: 'menu-pak-1',
     name: 'Paket Bucin (Seblak Komplit + Es Teh Jumbo)',
     category: 'Paket',
+    subCategory: 'Paket Hemat / Bucin',
     price: 20000,
     costPrice: 12000,
     stock: 25,
